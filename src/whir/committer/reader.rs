@@ -195,7 +195,7 @@ where
 #[cfg(test)]
 mod tests {
     use p3_baby_bear::BabyBear;
-    use p3_dft::Radix2DitSmallBatch;
+    use p3_dft::Radix2DFTSmallBatch;
     use p3_field::PrimeCharacteristicRing;
     use p3_keccak::{Keccak256Hash, KeccakF};
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
@@ -292,7 +292,7 @@ mod tests {
         let committer = CommitmentWriter::new(&params);
 
         // Use a DFT engine to expand/fold the polynomial for evaluation.
-        let dft = Radix2DitSmallBatch::default();
+        let dft = Radix2DFTSmallBatch::default();
 
         // Set up Fiat-Shamir transcript and commit the protocol parameters.
         let mut ds = DomainSeparator::new("test", KeccakF);
@@ -331,7 +331,7 @@ mod tests {
 
         // Set up the committer and DFT engine.
         let committer = CommitmentWriter::new(&params);
-        let dft = Radix2DitSmallBatch::default();
+        let dft = Radix2DFTSmallBatch::default();
 
         // Begin the transcript and commit to the statement parameters.
         let mut ds = DomainSeparator::new("test", KeccakF);
@@ -373,7 +373,7 @@ mod tests {
 
         // Initialize the committer and DFT engine.
         let committer = CommitmentWriter::new(&params);
-        let dft = Radix2DitSmallBatch::default();
+        let dft = Radix2DFTSmallBatch::default();
 
         // Start a new transcript and commit to the public parameters.
         let mut ds = DomainSeparator::new("test", KeccakF);
@@ -410,7 +410,7 @@ mod tests {
 
         // Instantiate a committer and DFT backend.
         let committer = CommitmentWriter::new(&params);
-        let dft = Radix2DitSmallBatch::default();
+        let dft = Radix2DFTSmallBatch::default();
 
         // Set up Fiat-Shamir transcript and commit to the public parameters.
         let mut ds = DomainSeparator::new("oods_constraints_test", KeccakF);

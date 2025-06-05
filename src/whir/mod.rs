@@ -1,7 +1,7 @@
 use committer::{reader::CommitmentReader, writer::CommitmentWriter};
 use p3_baby_bear::BabyBear;
 use p3_blake3::Blake3;
-use p3_dft::Radix2DitSmallBatch;
+use p3_dft::Radix2DFTSmallBatch;
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_keccak::KeccakF;
 use p3_monty_31::dft::RecursiveDft;
@@ -141,7 +141,7 @@ pub fn make_whir_things(
     // Generate a proof using the prover
     let prover = Prover(&params);
 
-    let dft_prover = Radix2DitSmallBatch::<F>::default();
+    let dft_prover = Radix2DFTSmallBatch::<F>::default();
 
     // Generate a STARK proof for the given statement and witness
     prover

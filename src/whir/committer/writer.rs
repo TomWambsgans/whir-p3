@@ -151,7 +151,7 @@ where
 #[cfg(test)]
 mod tests {
     use p3_baby_bear::BabyBear;
-    use p3_dft::Radix2DitSmallBatch;
+    use p3_dft::Radix2DFTSmallBatch;
     use p3_keccak::{Keccak256Hash, KeccakF};
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
     use rand::Rng;
@@ -230,7 +230,7 @@ mod tests {
 
         // Run the Commitment Phase
         let committer = CommitmentWriter::new(&params);
-        let dft_committer = Radix2DitSmallBatch::<F>::default();
+        let dft_committer = Radix2DFTSmallBatch::<F>::default();
         let witness = committer
             .commit(&dft_committer, &mut prover_state, polynomial.clone())
             .unwrap();
@@ -318,7 +318,7 @@ mod tests {
 
         let mut prover_state = domainsep.to_prover_state::<_, 32>();
 
-        let dft_committer = Radix2DitSmallBatch::<F>::default();
+        let dft_committer = Radix2DFTSmallBatch::<F>::default();
         let committer = CommitmentWriter::new(&params);
         let _ = committer
             .commit(&dft_committer, &mut prover_state, polynomial)
@@ -377,7 +377,7 @@ mod tests {
         domainsep.commit_statement(&params);
         let mut prover_state = domainsep.to_prover_state::<_, 32>();
 
-        let dft_committer = Radix2DitSmallBatch::<F>::default();
+        let dft_committer = Radix2DFTSmallBatch::<F>::default();
         let committer = CommitmentWriter::new(&params);
         let witness = committer
             .commit(&dft_committer, &mut prover_state, polynomial)
