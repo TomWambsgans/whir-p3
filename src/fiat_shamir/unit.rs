@@ -1,28 +1,4 @@
-use p3_symmetric::Permutation;
-
-/// A [`DuplexInterface`] is an abstract interface for absorbing and squeezing data.
-/// The type parameter `U` represents basic unit that the sponge works with.
-///
-/// We require [`DuplexInterface`] implementations to have a [`std::default::Default`]
-/// implementation, that initializes to zero the hash function state, and a [`zeroize::Zeroize`]
-/// implementation for secure deletion.
-///
-/// **HAZARD**: Don't implement this trait unless you know what you are doing.
-/// Consider using the sponges already provided by this library.
-pub trait DuplexSpongeInterface<C, U, const WIDTH: usize>: zeroize::Zeroize
-where
-    U: Unit,
-    C: Permutation<[U; WIDTH]>,
-{
-    /// Initializes a new sponge, setting up the state.
-    fn new<const IV_SIZE: usize>(permutation: C, iv: [u8; IV_SIZE]) -> Self;
-
-    /// Absorbs new elements in the sponge.
-    fn absorb_unchecked(&mut self, input: &[U]) -> &mut Self;
-
-    /// Squeezes out new elements.
-    fn squeeze_unchecked(&mut self, output: &mut [U]) -> &mut Self;
-}
+use crate::fiat_shamir::errors::DomainSeparatorMismatch;
 
 /// Basic units over which a sponge operates.
 ///
@@ -83,4 +59,21 @@ impl Unit for u8 {
     fn slice_from_u8_slice(src: &[u8]) -> Vec<Self> {
         src.to_vec()
     }
+}
+
+/// Squeezing bytes from the sponge.
+///
+/// While this trait is trivial for byte-oriented sponges, it is non-trivial for algebraic hashes.
+/// In particular, the implementation of this trait is expected to provide different guarantees
+/// between units `u8` and $\mathbb{F}_p$ elements:
+/// - `u8` implementations are assumed to be streaming-friendly, that is:
+///   `implementor.fill_challenge_units(&mut out[..1]); implementor.fill_challenge_units(&mut
+///   out[1..]);` is expected to be equivalent to `implementor.fill_challenge_units(&mut out);`.
+/// - $\mathbb{F}_p$ implementations are expected to provide no such guarantee. In addition, we expect the implementation to return bytes that are uniformly distributed. In particular, note that the most significant bytes of a $\mod p$ element are not uniformly distributed. The number of bytes good to be used can be discovered playing with [our scripts](https://github.com/arkworks-rs/spongefish/blob/main/scripts/useful_bits_modp.py).
+pub trait UnitToBytes<U>
+where
+    U: Unit,
+{
+    /// Fill `input` with units sampled uniformly at random.
+    fn fill_challenge_units(&mut self, input: &mut [U]) -> Result<(), DomainSeparatorMismatch>;
 }

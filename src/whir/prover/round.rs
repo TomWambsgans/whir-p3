@@ -1,19 +1,14 @@
+use p3_challenger::{CanObserve, CanSample};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
 use p3_matrix::dense::DenseMatrix;
 use p3_merkle_tree::MerkleTree;
-use p3_symmetric::Permutation;
 use tracing::{info_span, instrument};
 
 use super::{Leafs, Proof, Prover};
 use crate::{
     domain::Domain,
-    fiat_shamir::{
-        duplex_sponge::interface::{DuplexSpongeInterface, Unit},
-        errors::ProofResult,
-        pow::traits::PowStrategy,
-        prover::ProverState,
-    },
+    fiat_shamir::{errors::ProofResult, pow::traits::PowStrategy, prover::ProverState, unit::Unit},
     poly::{coeffs::CoefficientStorage, evals::EvaluationStorage, multilinear::MultilinearPoint},
     sumcheck::sumcheck_single::SumcheckSingle,
     whir::{
@@ -113,17 +108,9 @@ where
     /// This function should be called once at the beginning of the proof, before entering the
     /// main WHIR folding loop.
     #[instrument(skip_all)]
-    pub(crate) fn initialize_first_round_state<
-        H,
-        C,
-        PS,
-        D,
-        Perm,
-        FiatShamirHash,
-        const PERM_WIDTH: usize,
-    >(
-        prover: &Prover<'_, EF, F, H, C, PS, Perm, FiatShamirHash, W, PERM_WIDTH>,
-        prover_state: &mut ProverState<EF, F, Perm, FiatShamirHash, W, PERM_WIDTH>,
+    pub(crate) fn initialize_first_round_state<MyChallenger, C, PS, D, Challenger>(
+        prover: &Prover<'_, EF, F, MyChallenger, C, PS, Challenger, W>,
+        prover_state: &mut ProverState<EF, F, Challenger, W>,
         mut statement: Statement<EF>,
         witness: Witness<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
         dft: &D,
@@ -132,8 +119,7 @@ where
         PS: PowStrategy,
         D: TwoAdicSubgroupDft<F>,
         W: Unit + Default + Copy,
-        Perm: Permutation<[W; PERM_WIDTH]>,
-        FiatShamirHash: DuplexSpongeInterface<Perm, W, PERM_WIDTH>,
+        Challenger: CanObserve<W> + CanSample<W>,
     {
         // Convert witness ood_points into constraints
         let new_constraints = witness
@@ -159,20 +145,19 @@ where
 
             // Create the sumcheck prover
             let mut sumcheck = SumcheckSingle::from_base_evals(
-                witness.pol_evals.clone(),
+                witness.pol_evals.parallel_clone(), // TODO I think we could avoid cloning here
                 &statement,
                 combination_randomness_gen,
             );
 
             // Compute sumcheck polynomials and return the folding randomness values
-            let folding_randomness = sumcheck
-                .compute_sumcheck_polynomials::<PS, _, _, _, _, PERM_WIDTH>(
-                    prover_state,
-                    prover.folding_factor.at_round(0),
-                    prover.starting_folding_pow_bits,
-                    None,
-                    dft,
-                )?;
+            let folding_randomness = sumcheck.compute_sumcheck_polynomials::<PS, _, _, _>(
+                prover_state,
+                prover.folding_factor.at_round(0),
+                prover.starting_folding_pow_bits,
+                None,
+                dft,
+            )?;
 
             sumcheck_prover = Some(sumcheck);
             folding_randomness
@@ -215,14 +200,15 @@ where
 mod tests {
     use p3_baby_bear::BabyBear;
     use p3_blake3::Blake3;
+    use p3_challenger::HashChallenger;
     use p3_dft::NaiveDft;
     use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
-    use p3_keccak::KeccakF;
+    use p3_keccak::Keccak256Hash;
     use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 
     use super::*;
     use crate::{
-        fiat_shamir::{DefaultPerm, domain_separator::DomainSeparator, pow::blake3::Blake3PoW},
+        fiat_shamir::{domain_separator::DomainSeparator, pow::blake3::Blake3PoW},
         parameters::{
             FoldingFactor, MultivariateParameters, ProtocolParameters, errors::SecurityAssumption,
         },
@@ -230,7 +216,7 @@ mod tests {
             coeffs::CoefficientList,
             evals::{EvaluationStorage, EvaluationsList},
         },
-        whir::{FiatShamirHash, Perm, W, WhirConfig, committer::writer::CommitmentWriter},
+        whir::{W, WhirConfig, committer::writer::CommitmentWriter},
     };
 
     type F = BabyBear;
@@ -238,6 +224,7 @@ mod tests {
     type ByteHash = Blake3;
     type FieldHash = SerializingHasher<ByteHash>;
     type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
+    type MyChallenger = HashChallenger<u8, Keccak256Hash, 32>;
 
     const DIGEST_ELEMS: usize = 32;
 
@@ -256,7 +243,7 @@ mod tests {
         initial_statement: bool,
         folding_factor: usize,
         pow_bits: usize,
-    ) -> WhirConfig<EF4, F, FieldHash, MyCompress, Blake3PoW, Perm, FiatShamirHash, W, 200> {
+    ) -> WhirConfig<EF4, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, W> {
         // Construct the multivariate parameter set with `num_variables` variables,
         // determining the size of the evaluation domain.
         let mv_params = MultivariateParameters::<EF4>::new(num_variables);
@@ -290,15 +277,15 @@ mod tests {
     /// This is used as a boilerplate step before running the first WHIR round.
     #[allow(clippy::type_complexity)]
     fn setup_domain_and_commitment(
-        params: &WhirConfig<EF4, F, FieldHash, MyCompress, Blake3PoW, Perm, FiatShamirHash, W, 200>,
+        params: &WhirConfig<EF4, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, W>,
         poly: EvaluationsList<F>,
     ) -> (
-        DomainSeparator<EF4, F, DefaultPerm, u8, 200>,
-        ProverState<EF4, F, Perm, FiatShamirHash, W, 200>,
+        DomainSeparator<EF4, F, u8>,
+        ProverState<EF4, F, MyChallenger, W>,
         Witness<EF4, F, u8, DenseMatrix<F>, DIGEST_ELEMS>,
     ) {
         // Create a new Fiat-Shamir domain separator.
-        let mut domsep = DomainSeparator::new("🌪️", KeccakF);
+        let mut domsep = DomainSeparator::new("🌪️");
 
         // Absorb the public statement into the transcript for binding.
         domsep.commit_statement(params);
@@ -306,8 +293,10 @@ mod tests {
         // Reserve transcript space for WHIR proof messages.
         domsep.add_whir_proof(params);
 
+        let challenger = MyChallenger::new(vec![], Keccak256Hash);
+
         // Convert the domain separator into a mutable prover-side transcript.
-        let mut prover_state = domsep.to_prover_state::<_, 32>();
+        let mut prover_state = domsep.to_prover_state(challenger);
 
         // Create a committer using the protocol configuration (Merkle parameters, hashers, etc.).
         let committer = CommitmentWriter::new(params);

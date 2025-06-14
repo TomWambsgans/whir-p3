@@ -1,29 +1,26 @@
 use std::ops::Deref;
 
+use p3_challenger::{CanObserve, CanSample};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, Field, Packable, PrimeField64, TwoAdicField};
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CryptographicHasher, Permutation, PseudoCompressionFunction};
+use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use super::{committer::Witness, parameters::WhirConfig, statement::Statement};
 use crate::{
-    fiat_shamir::{
-        duplex_sponge::interface::{DuplexSpongeInterface, Unit},
-        errors::ProofResult,
-        pow::traits::PowStrategy,
-        prover::ProverState,
-    },
+    fiat_shamir::{errors::ProofResult, pow::traits::PowStrategy, prover::ProverState, unit::Unit},
     poly::{
         coeffs::{CoefficientList, CoefficientStorage},
         evals::{EvaluationStorage, EvaluationsList},
         multilinear::MultilinearPoint,
     },
     sumcheck::sumcheck_single::SumcheckSingle,
+    utils::parallel_clone,
     whir::{
         parameters::RoundConfig,
         statement::weights::Weights,
@@ -37,36 +34,33 @@ pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
 pub type Leafs<F> = Vec<Vec<F>>;
 
 #[derive(Debug)]
-pub struct Prover<'a, EF, F, H, C, PowStrategy, Perm, FiatShamirHash, W, const PERM_WIDTH: usize>(
+pub struct Prover<'a, EF, F, H, C, PowStrategy, Challenger, W>(
     /// Reference to the protocol configuration shared across prover components.
-    pub &'a WhirConfig<EF, F, H, C, PowStrategy, Perm, FiatShamirHash, W, PERM_WIDTH>,
+    pub &'a WhirConfig<EF, F, H, C, PowStrategy, Challenger, W>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<EF, F, H, C, PS, Perm, FiatShamirHash, W, const PERM_WIDTH: usize> Deref
-    for Prover<'_, EF, F, H, C, PS, Perm, FiatShamirHash, W, PERM_WIDTH>
+impl<EF, F, H, C, PS, Challenger, W> Deref for Prover<'_, EF, F, H, C, PS, Challenger, W>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<EF, F, H, C, PS, Perm, FiatShamirHash, W, PERM_WIDTH>;
+    type Target = WhirConfig<EF, F, H, C, PS, Challenger, W>;
 
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
-impl<EF, F, H, C, PS, Perm, FiatShamirHash, W, const PERM_WIDTH: usize>
-    Prover<'_, EF, F, H, C, PS, Perm, FiatShamirHash, W, PERM_WIDTH>
+impl<EF, F, H, C, PS, Challenger, W> Prover<'_, EF, F, H, C, PS, Challenger, W>
 where
     F: Field + TwoAdicField + PrimeField64,
     EF: ExtensionField<F> + TwoAdicField,
     PS: PowStrategy,
     W: Unit + Default + Copy,
-    Perm: Permutation<[W; PERM_WIDTH]>,
-    FiatShamirHash: DuplexSpongeInterface<Perm, W, PERM_WIDTH>,
+    Challenger: CanObserve<W> + CanSample<W>,
 {
     /// Validates that the total number of variables expected by the prover configuration
     /// matches the number implied by the folding schedule and the final rounds.
@@ -150,7 +144,7 @@ where
     pub fn prove<D, const DIGEST_ELEMS: usize>(
         &self,
         dft: &D,
-        prover_state: &mut ProverState<EF, F, Perm, FiatShamirHash, W, PERM_WIDTH>,
+        prover_state: &mut ProverState<EF, F, Challenger, W>,
         statement: Statement<EF>,
         witness: Witness<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
     ) -> ProofResult<(MultilinearPoint<EF>, Vec<EF>)>
@@ -204,7 +198,7 @@ where
         &self,
         round_index: usize,
         dft: &D,
-        prover_state: &mut ProverState<EF, F, Perm, FiatShamirHash, W, PERM_WIDTH>,
+        prover_state: &mut ProverState<EF, F, Challenger, W>,
         round_state: &mut RoundState<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
@@ -221,7 +215,7 @@ where
                 EvaluationStorage::Base(_) => {
                     panic!("After a first round, the evaluations must be in the extension field")
                 }
-                EvaluationStorage::Extension(f) => f.clone(),
+                EvaluationStorage::Extension(f) => f.parallel_clone(),
             }
         } else {
             round_state
@@ -259,8 +253,10 @@ where
         let folded_matrix = info_span!("fold matrix").in_scope(|| {
             let coeffs = info_span!("copy_across_coeffs").in_scope(|| {
                 let mut coeffs = EF::zero_vec(new_domain.size());
-                coeffs[..folded_evaluations.num_evals()]
-                    .copy_from_slice(folded_coefficients.coeffs());
+                parallel_clone(
+                    folded_coefficients.coeffs(),
+                    &mut coeffs[..folded_evaluations.num_evals()],
+                );
                 coeffs
             });
             // Do DFT on only interleaved polys to be folded.
@@ -287,7 +283,7 @@ where
             prover_state,
             round_params.ood_samples,
             num_variables,
-            |point| folded_evaluations.evaluate(point),
+            |point| info_span!("ood evaluation").in_scope(|| folded_evaluations.evaluate(point)),
         )?;
 
         // STIR Queries
@@ -389,20 +385,19 @@ where
                 }
 
                 SumcheckSingle::from_extension_evals(
-                    folded_evaluations.clone(),
+                    folded_evaluations.parallel_clone(),
                     &statement,
                     combination_randomness[1],
                 )
             };
 
-        let folding_randomness = sumcheck_prover
-            .compute_sumcheck_polynomials::<PS, _, _, _, _, PERM_WIDTH>(
-                prover_state,
-                folding_factor_next,
-                round_params.folding_pow_bits,
-                None,
-                dft,
-            )?;
+        let folding_randomness = sumcheck_prover.compute_sumcheck_polynomials::<PS, _, _, _>(
+            prover_state,
+            folding_factor_next,
+            round_params.folding_pow_bits,
+            None,
+            dft,
+        )?;
 
         let start_idx = self.folding_factor.total_number(round_index);
         let dst_randomness =
@@ -430,7 +425,7 @@ where
     fn final_round<D, const DIGEST_ELEMS: usize>(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<EF, F, Perm, FiatShamirHash, W, PERM_WIDTH>,
+        prover_state: &mut ProverState<EF, F, Challenger, W>,
         round_state: &mut RoundState<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
         folded_coefficients: &CoefficientList<EF>,
         folded_evaluations: &EvaluationsList<EF>,
@@ -505,12 +500,12 @@ where
                 .clone()
                 .unwrap_or_else(|| {
                     SumcheckSingle::from_extension_evals(
-                        folded_evaluations.clone(),
+                        folded_evaluations.parallel_clone(),
                         &round_state.statement,
                         EF::ONE,
                     )
                 })
-                .compute_sumcheck_polynomials::<PS, _, _, _, _, PERM_WIDTH>(
+                .compute_sumcheck_polynomials::<PS, _, _, _>(
                     prover_state,
                     self.final_sumcheck_rounds,
                     self.final_folding_pow_bits,
@@ -537,7 +532,7 @@ where
     fn compute_stir_queries<const DIGEST_ELEMS: usize>(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<EF, F, Perm, FiatShamirHash, W, PERM_WIDTH>,
+        prover_state: &mut ProverState<EF, F, Challenger, W>,
         round_state: &RoundState<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
         num_variables: usize,
         round_params: &RoundConfig<EF>,

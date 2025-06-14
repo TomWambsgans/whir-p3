@@ -1,9 +1,10 @@
 use committer::{reader::CommitmentReader, writer::CommitmentWriter};
 use p3_baby_bear::BabyBear;
 use p3_blake3::Blake3;
+use p3_challenger::HashChallenger;
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
-use p3_keccak::KeccakF;
+use p3_keccak::Keccak256Hash;
 use p3_monty_31::dft::RecursiveDft;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use parameters::WhirConfig;
@@ -12,10 +13,7 @@ use statement::{Statement, weights::Weights};
 use verifier::Verifier;
 
 use crate::{
-    fiat_shamir::{
-        DefaultHash, DefaultPerm, domain_separator::DomainSeparator, keccak::KECCAK_WIDTH_BYTES,
-        pow::blake3::Blake3PoW,
-    },
+    fiat_shamir::{domain_separator::DomainSeparator, pow::blake3::Blake3PoW},
     parameters::{
         FoldingFactor, MultivariateParameters, ProtocolParameters, errors::SecurityAssumption,
     },
@@ -34,20 +32,18 @@ type EF = BinomialExtensionField<F, 4>;
 type ByteHash = Blake3;
 type FieldHash = SerializingHasher<ByteHash>;
 type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
-type Perm = DefaultPerm;
-type FiatShamirHash = DefaultHash;
+type MyChallenger = HashChallenger<u8, Keccak256Hash, 32>;
 type W = u8;
-const PERM_WIDTH: usize = KECCAK_WIDTH_BYTES;
 
-/// Run a complete WHIR STARK proof lifecycle.
+/// Run a complete WHIR proof lifecycle.
 ///
 /// This function performs the full pipeline:
 /// - Defines a multilinear polynomial with `num_variables`
 /// - Generates constraints for this polynomial
 /// - Initializes a Fiat-Shamir transcript (challenger)
 /// - Commits to the polynomial and produces a witness
-/// - Generates a STARK proof with the prover
-/// - Verifies the proof with the verifier
+/// - Generates a WHIR proof
+/// - Verifies the proof
 ///
 /// The protocol is configured using folding, soundness, and PoW parameters.
 pub fn make_whir_things(
@@ -83,22 +79,15 @@ pub fn make_whir_things(
     };
 
     // Combine protocol and polynomial parameters into a single config
-    let params = WhirConfig::<
-        EF,
-        F,
-        FieldHash,
-        MyCompress,
-        Blake3PoW,
-        Perm,
-        FiatShamirHash,
-        W,
-        PERM_WIDTH,
-    >::new(mv_params, whir_params);
+    let params = WhirConfig::<EF, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, W>::new(
+        mv_params,
+        whir_params,
+    );
 
     // Define a polynomial with all coefficients set to 1
     let polynomial = CoefficientList::new(vec![F::ONE; num_coeffs]).to_evaluations();
 
-    // Sample `num_points` random multilinear points in the Boolean hypercube
+    // Sample `num_points` multilinear points
     let points: Vec<_> = (0..num_points)
         .map(|_| MultilinearPoint((0..num_variables).map(|i| EF::from_u64(i as u64)).collect()))
         .collect();
@@ -122,12 +111,14 @@ pub fn make_whir_things(
     statement.add_constraint(linear_claim_weight, sum);
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
-    let mut domainsep = DomainSeparator::new("🌪️", KeccakF);
+    let mut domainsep = DomainSeparator::new("🌪️");
     domainsep.commit_statement(&params);
     domainsep.add_whir_proof(&params);
 
+    let challenger = MyChallenger::new(vec![], Keccak256Hash);
+
     // Initialize the Merlin transcript from the IOPattern
-    let mut prover_state = domainsep.to_prover_state::<_, 32>();
+    let mut prover_state = domainsep.to_prover_state(challenger.clone());
 
     // Commit to the polynomial and produce a witness
     let committer = CommitmentWriter::new(&params);
@@ -138,12 +129,11 @@ pub fn make_whir_things(
         .commit(&dft_committer, &mut prover_state, polynomial)
         .unwrap();
 
-    // Generate a proof using the prover
     let prover = Prover(&params);
 
     let dft_prover = Radix2DFTSmallBatch::<F>::default();
 
-    // Generate a STARK proof for the given statement and witness
+    // Generate a proof for the given statement and witness
     prover
         .prove(&dft_prover, &mut prover_state, statement.clone(), witness)
         .unwrap();
@@ -155,7 +145,7 @@ pub fn make_whir_things(
     let verifier = Verifier::new(&params);
 
     // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
-    let mut verifier_state = domainsep.to_verifier_state::<_, 32>(prover_state.narg_string());
+    let mut verifier_state = domainsep.to_verifier_state(prover_state.narg_string(), challenger);
 
     // Parse the commitment
     let parsed_commitment = commitment_reader

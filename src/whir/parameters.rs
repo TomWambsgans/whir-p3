@@ -1,11 +1,11 @@
 use std::{any::TypeId, f64::consts::LOG2_10, marker::PhantomData};
 
+use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_symmetric::Permutation;
 
 use crate::{
     domain::Domain,
-    fiat_shamir::duplex_sponge::interface::{DuplexSpongeInterface, Unit},
+    fiat_shamir::unit::Unit,
     parameters::{
         FoldingFactor, MultivariateParameters, ProtocolParameters, errors::SecurityAssumption,
     },
@@ -26,7 +26,7 @@ pub struct RoundConfig<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct WhirConfig<EF, F, H, C, PowStrategy, Perm, FiatShamirHash, W, const PERM_WIDTH: usize>
+pub struct WhirConfig<EF, F, MyChallenger, C, PowStrategy, Challenger, W>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -61,29 +61,27 @@ where
     pub pow_strategy: PhantomData<PowStrategy>,
 
     // Merkle tree parameters
-    pub merkle_hash: H,
+    pub merkle_hash: MyChallenger,
     pub merkle_compress: C,
 
     pub _base_field: PhantomData<F>,
     pub _extension_field: PhantomData<EF>,
-    pub _fiat_shamir_permutation: PhantomData<Perm>,
-    pub _fiat_shamir_hash: PhantomData<FiatShamirHash>,
-    pub _fiat_shamir_unit: PhantomData<W>,
+    pub _challenger: PhantomData<Challenger>,
+    pub _unit: PhantomData<W>,
 }
 
-impl<EF, F, H, C, PowStrategy, Perm, FiatShamirHash, W, const PERM_WIDTH: usize>
-    WhirConfig<EF, F, H, C, PowStrategy, Perm, FiatShamirHash, W, PERM_WIDTH>
+impl<EF, F, MyChallenger, C, PowStrategy, Challenger, W>
+    WhirConfig<EF, F, MyChallenger, C, PowStrategy, Challenger, W>
 where
     F: Field + TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
     W: Unit + Default + Copy,
-    Perm: Permutation<[W; PERM_WIDTH]>,
-    FiatShamirHash: DuplexSpongeInterface<Perm, W, PERM_WIDTH>,
+    Challenger: CanObserve<W> + CanSample<W>,
 {
     #[allow(clippy::too_many_lines)]
     pub fn new(
         mv_parameters: MultivariateParameters<EF>,
-        whir_parameters: ProtocolParameters<H, C>,
+        whir_parameters: ProtocolParameters<MyChallenger, C>,
     ) -> Self {
         whir_parameters
             .folding_factor
@@ -261,9 +259,8 @@ where
             merkle_compress: whir_parameters.merkle_compress,
             _base_field: PhantomData,
             _extension_field: PhantomData,
-            _fiat_shamir_permutation: PhantomData,
-            _fiat_shamir_hash: PhantomData,
-            _fiat_shamir_unit: PhantomData,
+            _challenger: PhantomData,
+            _unit: PhantomData,
         }
     }
 
@@ -277,6 +274,13 @@ where
         } else {
             1
         }
+    }
+
+    /// Returns the log2 size of the largest FFT
+    /// (At commitment we perform 2^folding_factor FFT of size 2^max_fft_size)
+    pub const fn max_fft_size(&self) -> usize {
+        self.mv_parameters.num_variables + self.starting_log_inv_rate
+            - self.folding_factor.at_round(0)
     }
 
     pub fn check_pow_bits(&self) -> bool {
@@ -422,15 +426,18 @@ where
 #[cfg(test)]
 mod tests {
     use p3_baby_bear::BabyBear;
+    use p3_challenger::HashChallenger;
     use p3_field::PrimeCharacteristicRing;
+    use p3_keccak::Keccak256Hash;
     use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 
     use super::*;
-    use crate::whir::{FiatShamirHash, Perm, W};
+    use crate::whir::W;
 
     type F = BabyBear;
     type Poseidon2Compression<Perm16> = TruncatedPermutation<Perm16, 2, 8, 16>;
     type Poseidon2Sponge<Perm24> = PaddingFreeSponge<Perm24, 24, 16, 8>;
+    type MyChallenger = HashChallenger<u8, Keccak256Hash, 32>;
 
     /// Generates default WHIR parameters
     const fn default_whir_params()
@@ -459,10 +466,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         assert_eq!(config.security_level, 100);
@@ -481,10 +486,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         assert_eq!(config.n_rounds(), config.round_parameters.len());
@@ -495,14 +498,13 @@ mod tests {
         let field_size_bits = 64;
         let soundness = SecurityAssumption::CapacityBound;
 
-        let pow_bits =
-            WhirConfig::<F, F, u8, u8, (), Perm, FiatShamirHash, W, 200>::folding_pow_bits(
-                100, // Security level
-                soundness,
-                field_size_bits,
-                10, // Number of variables
-                5,  // Log inverse rate
-            );
+        let pow_bits = WhirConfig::<F, F, u8, u8, (), MyChallenger, W>::folding_pow_bits(
+            100, // Security level
+            soundness,
+            field_size_bits,
+            10, // Number of variables
+            5,  // Log inverse rate
+        );
 
         // PoW bits should never be negative
         assert!(pow_bits >= 0.);
@@ -518,10 +520,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         // Set all values within limits
@@ -574,10 +574,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         config.max_pow_bits = 20;
@@ -601,10 +599,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         config.max_pow_bits = 20;
@@ -628,10 +624,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         config.max_pow_bits = 20;
@@ -669,10 +663,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         config.max_pow_bits = 20;
@@ -710,10 +702,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         config.max_pow_bits = 20;
@@ -750,10 +740,8 @@ mod tests {
             Poseidon2Sponge<u8>,
             Poseidon2Compression<u8>,
             (),
-            Perm,
-            FiatShamirHash,
+            MyChallenger,
             W,
-            200,
         >::new(mv_params, params);
 
         config.max_pow_bits = 20;
