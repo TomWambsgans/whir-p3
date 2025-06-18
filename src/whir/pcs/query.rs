@@ -1,6 +1,6 @@
 use p3_field::Field;
 
-use crate::utils::eval_eq;
+use crate::{poly::multilinear::MultilinearPoint, utils::eval_eq};
 
 /// A query to a multilinear polynomial over an extension field.
 ///
@@ -25,7 +25,7 @@ pub enum MlQuery<F> {
     /// ```text
     /// Eq([α_0, α_1, α_2]) → query at (α_0, α_1, α_2)
     /// ```
-    Eq(Vec<F>),
+    Eq(MultilinearPoint<F>),
 
     /// A rotated query: evaluate the polynomial at a rotated version of the point.
     ///
@@ -38,13 +38,38 @@ pub enum MlQuery<F> {
     /// ```text
     /// EqRotateRight([α_0, α_1, α_2], 1) → query at (α_2, α_0, α_1)
     /// ```
-    EqRotateRight(Vec<F>, usize),
+    EqRotateRight(MultilinearPoint<F>, usize),
 }
 
 impl<F> MlQuery<F>
 where
     F: Field,
 {
+    /// Returns the number of variables (`log_b`) in the multilinear query point.
+    ///
+    /// This corresponds to the dimensionality of the Boolean hypercube over which
+    /// the multilinear polynomial is evaluated.
+    ///
+    /// The value `log_b` is the length of the underlying vector `z`, regardless
+    /// of whether the query is a direct evaluation (`Eq`) or a rotated evaluation (`EqRotateRight`).
+    ///
+    /// # Example
+    /// ```text
+    /// let q = MlQuery::Eq(MultilinearPoint(vec![x0, x1, x2]));
+    /// assert_eq!(q.log_b(), 3);
+    /// ```
+    ///
+    /// For `EqRotateRight(z, r)`, the rotation does not affect `log_b`.
+    ///
+    /// # Returns
+    /// The number of variables (length of the `z` vector).
+    #[must_use]
+    pub fn log_b(&self) -> usize {
+        match self {
+            Self::Eq(z) | Self::EqRotateRight(z, _) => z.len(),
+        }
+    }
+
     /// Evaluate the multilinear equality polynomial corresponding to the query.
     ///
     /// This returns the evaluation of the multilinear equality polynomial
@@ -74,7 +99,7 @@ where
             // Standard case: evaluate at z
             Self::Eq(z) => {
                 // Allocate output buffer of size 2^n
-                let mut mle = vec![F::ZERO; 1 << z.len()];
+                let mut mle = F::zero_vec(1 << z.len());
 
                 // Fill with α ⋅ eq(x, z) for all x ∈ {0,1}^n
                 eval_eq::<_, _, false>(z, &mut mle, scalar);
@@ -85,7 +110,7 @@ where
             // Rotated case: evaluate at z, then rotate output
             Self::EqRotateRight(z, mid) => {
                 // Allocate output buffer of size 2^n
-                let mut mle = vec![F::ZERO; 1 << z.len()];
+                let mut mle = F::zero_vec(1 << z.len());
 
                 // Compute α ⋅ eq(x, z)
                 eval_eq::<_, _, false>(z, &mut mle, scalar);
@@ -144,7 +169,7 @@ mod tests {
         let z = vec![F::ONE, F::ZERO];
         let scalar = F::from_u8(3);
 
-        let mle = MlQuery::Eq(z).to_mle(scalar);
+        let mle = MlQuery::Eq(MultilinearPoint(z)).to_mle(scalar);
 
         // Manually compute:
         // eq((0,0), z) = (1 - z0)(1 - z1) = 0
@@ -165,7 +190,7 @@ mod tests {
         let z = vec![F::ONE, F::ONE, F::ZERO];
         let scalar = F::from_u8(2);
 
-        let mle = MlQuery::Eq(z.clone()).to_mle(scalar);
+        let mle = MlQuery::Eq(MultilinearPoint(z.clone())).to_mle(scalar);
         let expected = naive_eq(&z, scalar);
 
         assert_eq!(mle, expected);
@@ -181,7 +206,7 @@ mod tests {
         let mid = 1;
 
         // Compute using the actual implementation
-        let mle = MlQuery::EqRotateRight(z.clone(), mid).to_mle(scalar);
+        let mle = MlQuery::EqRotateRight(MultilinearPoint(z.clone()), mid).to_mle(scalar);
 
         // Expected behavior:
         // - First compute the equality polynomial: naive_eq(z, scalar)
@@ -198,7 +223,7 @@ mod tests {
         let z = vec![];
         let scalar = F::from_u8(7);
 
-        let mle = MlQuery::Eq(z).to_mle(scalar);
+        let mle = MlQuery::Eq(MultilinearPoint(z)).to_mle(scalar);
         let expected = vec![scalar];
 
         assert_eq!(mle, expected);
@@ -214,7 +239,7 @@ mod tests {
         let mid = 2;
 
         // Actual mle computation with rotation
-        let mle = MlQuery::EqRotateRight(z.clone(), mid).to_mle(scalar);
+        let mle = MlQuery::EqRotateRight(MultilinearPoint(z.clone()), mid).to_mle(scalar);
 
         // Expected behavior:
         // - Compute eq(x, z) for all x ∈ {0,1}⁴ → output has 2⁴ = 16 values
@@ -223,5 +248,28 @@ mod tests {
         expected.rotate_right(mid);
 
         assert_eq!(mle, expected);
+    }
+
+    #[test]
+    fn test_log_b_all_supported_lengths() {
+        for log_b in 0..=4 {
+            let point: MultilinearPoint<F> = MultilinearPoint(vec![F::from_u32(1); log_b]);
+
+            // Test regular Eq query
+            let query_eq = MlQuery::Eq(point.clone());
+            assert_eq!(
+                query_eq.log_b(),
+                log_b,
+                "Eq query with length {log_b} should return log_b = {log_b}"
+            );
+
+            // Test rotated query
+            let query_rot = MlQuery::EqRotateRight(point.clone(), 1);
+            assert_eq!(
+                query_rot.log_b(),
+                log_b,
+                "EqRotateRight query with length {log_b} should return log_b = {log_b}"
+            );
+        }
     }
 }

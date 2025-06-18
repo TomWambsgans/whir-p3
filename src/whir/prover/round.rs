@@ -134,7 +134,7 @@ where
         let folding_randomness = if prover.initial_statement {
             // If there is initial statement, then we run the sum-check for
             // this initial statement.
-            let [combination_randomness_gen] = prover_state.challenge_scalars()?;
+            let [combination_randomness_gen] = prover_state.challenge_scalars_array()?;
 
             // Create the sumcheck prover
             let mut sumcheck = SumcheckSingle::from_base_evals(
@@ -276,9 +276,9 @@ mod tests {
         Witness<EF4, F, u8, DenseMatrix<F>, DIGEST_ELEMS>,
     ) {
         // Create a new Fiat-Shamir domain separator.
-        let mut domsep = DomainSeparator::new("🌪️");
+        let mut domsep = DomainSeparator::new("🌪️", true);
 
-        // Absorb the public statement into the transcript for binding.
+        // Observe the public statement into the transcript for binding.
         domsep.commit_statement(params);
 
         // Reserve transcript space for WHIR proof messages.

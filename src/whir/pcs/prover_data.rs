@@ -7,7 +7,7 @@ use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     horizontally_truncated::HorizontallyTruncated,
 };
-use p3_util::{log2_ceil_usize, log2_strict_usize};
+use p3_util::log2_ceil_usize;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -26,14 +26,14 @@ pub struct ConcatMatsMeta {
     ///
     /// This equals `ceil(log2(total_padded_size))`, where each matrix is padded
     /// to a power-of-two width per row.
-    log_b: usize,
+    pub(crate) log_b: usize,
 
     /// Original dimensions (height and unpadded width) of each matrix,
     /// in the same order they were passed in.
     ///
     /// This is used to reconstruct the layout, apply constraints, or access
     /// individual submatrices.
-    dimensions: Vec<Dimensions>,
+    pub(crate) dimensions: Vec<Dimensions>,
 
     /// Contiguous memory ranges inside the full evaluation vector that
     /// correspond to each input matrix.
@@ -41,7 +41,7 @@ pub struct ConcatMatsMeta {
     /// Each range is aligned and padded such that rows are stored with
     /// `width.next_power_of_two()` stride, ensuring compatibility with DFTs.
     /// These ranges are disjoint and span a domain of size `1 << log_b`.
-    ranges: Vec<Range<usize>>,
+    pub(crate) ranges: Vec<Range<usize>>,
 }
 
 impl ConcatMatsMeta {
@@ -60,7 +60,7 @@ impl ConcatMatsMeta {
     ///
     /// # Returns
     /// - A new `ConcatMatsMeta` instance, with computed ranges and total size metadata.
-    fn new(dims: &[Dimensions]) -> Self {
+    pub(crate) fn new(dims: &[Dimensions]) -> Self {
         // Create an indexed list of dimensions to track original input order.
         let mut indexed_dims: Vec<_> = dims.iter().enumerate().collect();
 
@@ -112,7 +112,7 @@ impl ConcatMatsMeta {
     /// # Returns
     /// - The largest `log2_ceil(width)` value among all matrices in the metadata.
     /// - Returns `0` if no matrices are present.
-    fn max_log_width(&self) -> usize {
+    pub(crate) fn max_log_width(&self) -> usize {
         self.dimensions
             .iter()
             .map(|dim| log2_ceil_usize(dim.width))
@@ -141,15 +141,15 @@ impl ConcatMatsMeta {
     ///
     /// # Returns
     /// - A pair `(weights, sum)`:
-    ///   - `weights`: The constructed `Weights<Challenge>` used to enforce the constraint.
+    ///   - `weights`: The constructed `Weights<F>` used to enforce the constraint.
     ///   - `sum`: The expected value of `dot(ys, eq_r)` to match during verification.
-    fn constraint<Challenge: Field>(
+    pub(crate) fn constraint<F: Field>(
         &self,
         idx: usize,
-        query: &MlQuery<Challenge>,
-        ys: &[Challenge],
-        r: &[Challenge],
-    ) -> (Weights<Challenge>, Challenge) {
+        query: &MlQuery<F>,
+        ys: &[F],
+        r: &[F],
+    ) -> (Weights<F>, F) {
         // Determine how many bits are needed to index columns in this matrix.
         let log_width = log2_ceil_usize(self.dimensions[idx].width);
 
@@ -157,8 +157,8 @@ impl ConcatMatsMeta {
         let r = &r[..log_width];
 
         // Build the equality polynomial eq_r over the input challenge.
-        let mut eq_r = vec![Challenge::ZERO; 1 << r.len()];
-        eval_eq::<_, _, false>(r, &mut eq_r, Challenge::ONE);
+        let mut eq_r = F::zero_vec(1 << r.len());
+        eval_eq::<_, _, false>(r, &mut eq_r, F::ONE);
 
         // Compute the dot product of the selected row and eq_r.
         let sum = ys.iter().zip(&eq_r).map(|(y, e)| *y * *e).sum();
@@ -167,25 +167,35 @@ impl ConcatMatsMeta {
         let weights = match query {
             MlQuery::Eq(z) => {
                 // Construct the full evaluation point for this query:
-                //   - r: column selector (low bits)
+                //   - r: column selector
                 //   - z: row selector
                 //   - additional bits: identify the matrix index within the domain
-                let point = r
-                    .iter()
-                    .chain(z)
-                    .copied()
-                    .chain(
-                        (log2_strict_usize(self.ranges[idx].len())..self.log_b)
-                            .map(|i| Challenge::from_bool((self.ranges[idx].start >> i) & 1 == 1)),
-                    )
-                    .rev() // Reverse to match multilinear encoding order
-                    .collect();
+                //
+                // We assemble the point in order of significance: offset -> row -> column.
+                let point = {
+                    // 1. Offset bits (most significant), generated in big-endian order.
+                    let num_non_offset_vars = z.len() + r.len();
+                    let num_offset_vars = self.log_b - num_non_offset_vars;
+
+                    let offset_vars = (0..num_offset_vars).map(|i| {
+                        // To get the k-th MSB of the offset, we need to shift by (log_b - 1 - k)
+                        let bit_pos = self.log_b - 1 - i;
+                        F::from_bool((self.ranges[idx].start >> bit_pos) & 1 == 1)
+                    });
+
+                    // 2. Chain with row bits `z` and column bits `r`.
+                    offset_vars
+                        .chain(z.iter().copied())
+                        .chain(r.iter().copied())
+                        .collect()
+                };
+
                 Weights::evaluation(MultilinearPoint(point))
             }
 
             MlQuery::EqRotateRight(_, _) => {
                 // Evaluate the rotated query as a multilinear polynomial.
-                let query_evals = query.to_mle(Challenge::ONE);
+                let query_evals = query.to_mle(F::ONE);
 
                 // Choose the appropriate iterator depending on the build configuration.
                 #[cfg(feature = "parallel")]
@@ -218,7 +228,7 @@ impl ConcatMatsMeta {
                 //
                 // This ensures the result is shaped for a full multilinear polynomial domain (size = 2^log_b),
                 // while only the subrange corresponding to the matrix has non-zero entries.
-                let mut final_weights = Challenge::zero_vec(1 << self.log_b);
+                let mut final_weights = F::zero_vec(1 << self.log_b);
                 final_weights[self.ranges[idx].clone()].copy_from_slice(&weight_values);
 
                 // Return the computed weights as a full multilinear evaluation list.
@@ -245,13 +255,13 @@ pub struct ConcatMats<Val> {
     ///
     /// Each matrix is stored row-by-row with rows padded to the next power-of-two width,
     /// and the concatenated layout spans a total domain of size `2^log_b`.
-    values: Vec<Val>,
+    pub(crate) values: Vec<Val>,
 
     /// Metadata describing the logical layout of the concatenated matrices.
     ///
     /// Includes dimension, range, and variable information for each original matrix
     /// within the unified domain.
-    meta: ConcatMatsMeta,
+    pub(crate) meta: ConcatMatsMeta,
 }
 
 impl<Val: Field> ConcatMats<Val> {
@@ -265,7 +275,7 @@ impl<Val: Field> ConcatMats<Val> {
     ///
     /// # Returns
     /// - A `ConcatMats` instance containing the unified evaluation vector and metadata.
-    fn new(mats: Vec<RowMajorMatrix<Val>>) -> Self {
+    pub(crate) fn new(mats: Vec<RowMajorMatrix<Val>>) -> Self {
         let meta = ConcatMatsMeta::new(&mats.iter().map(Matrix::dimensions).collect::<Vec<_>>());
         let mut values = Val::zero_vec(1 << meta.log_b);
 
@@ -306,7 +316,10 @@ impl<Val: Field> ConcatMats<Val> {
     /// # Returns
     /// - A `HorizontallyTruncated<RowMajorMatrixView>` that presents a view
     ///   into the padded storage but with the original width restored.
-    fn mat(&self, idx: usize) -> HorizontallyTruncated<Val, RowMajorMatrixView<'_, Val>> {
+    pub(crate) fn mat(
+        &self,
+        idx: usize,
+    ) -> HorizontallyTruncated<Val, RowMajorMatrixView<'_, Val>> {
         HorizontallyTruncated::new(
             RowMajorMatrixView::new(
                 &self.values[self.meta.ranges[idx].clone()],
@@ -320,11 +333,11 @@ impl<Val: Field> ConcatMats<Val> {
 
 #[cfg(test)]
 mod tests {
-
-    use itertools::{chain, cloned, rev};
+    use itertools::chain;
     use p3_baby_bear::BabyBear;
-    use p3_field::{PrimeCharacteristicRing, dot_product};
+    use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
+    use p3_util::log2_strict_usize;
 
     use super::*;
     use crate::whir::pcs::query::MlQuery;
@@ -534,7 +547,7 @@ mod tests {
         let meta = ConcatMatsMeta::new(&dims);
 
         // Query selects row: since height = 1, z = [].
-        let query = MlQuery::Eq(vec![]);
+        let query = MlQuery::Eq(MultilinearPoint::default());
 
         // Row of values: y = [7, 9]
         let y0 = F::from_u8(7);
@@ -586,7 +599,7 @@ mod tests {
         let meta = &concat.meta;
 
         // Rotated query.
-        let query = MlQuery::EqRotateRight(vec![F::from_u8(7)], 1);
+        let query = MlQuery::EqRotateRight(MultilinearPoint(vec![F::from_u8(7)]), 1);
 
         let y0 = F::from_u8(9);
         let y1 = F::from_u8(10);
@@ -651,7 +664,7 @@ mod tests {
 
         // Index 1 (second matrix): shape 2x3
         // log2_ceil(3) = 2
-        let query = MlQuery::Eq(vec![F::from_u8(0)]); // z selects row 0
+        let query = MlQuery::Eq(MultilinearPoint(vec![F::from_u8(0)])); // z selects row 0
         let ys = vec![F::from_u8(5), F::from_u8(6), F::from_u8(7)];
         let r = vec![F::from_u8(1), F::from_u8(2), F::from_u8(9)]; // extra bits; truncated
 
@@ -676,8 +689,8 @@ mod tests {
                 // Should contain rev([r0, r1] + z + range bits)
                 let bits = (log2_strict_usize(meta.ranges[1].len())..meta.log_b)
                     .map(|i| F::from_bool((meta.ranges[1].start >> i) & 1 == 1));
-                let expected = rev(chain![r[..2].iter().copied(), vec![F::from_u8(0)], bits])
-                    .collect::<Vec<_>>();
+                let expected =
+                    chain![bits, vec![F::from_u8(0)], r[..2].iter().copied()].collect::<Vec<_>>();
                 assert_eq!(point.0, expected);
             }
             Weights::Linear { .. } => panic!("Expected Weights::Evaluation"),
@@ -686,46 +699,114 @@ mod tests {
 
     #[test]
     fn test_constraint_eq_rotate_right_high_dim() {
-        // Matrix: height = 4, width = 4
+        // -----------------------------------------------
+        // Matrix M: a 4×4 matrix, flattened row-wise
+        //
+        // M = [
+        //   [ 1,  2,  3,  4 ],   // row 0
+        //   [ 5,  6,  7,  8 ],   // row 1
+        //   [ 9, 10, 11, 12 ],   // row 2
+        //   [13, 14, 15, 16 ],   // row 3
+        // ]
+        //
+        // This corresponds to a function f(x0, x1, x2, x3) defined over {0,1}^4.
+        // Each row is indexed by x2, x3 and each column by x0, x1.
+        //
+        // f(0,0,0,0) = 1
+        // f(0,0,0,1) = 2
+        // f(0,0,1,0) = 3
+        // f(0,0,1,1) = 4
+        // f(0,1,0,0) = 5
+        // f(0,1,0,1) = 6
+        // f(0,1,1,0) = 7
+        // f(0,1,1,1) = 8
+        // f(1,0,0,0) = 9
+        // f(1,0,0,1) = 10
+        // ...
+        // -----------------------------------------------
         let mat = RowMajorMatrix::new(
             vec![
-                1, 2, 3, 4, // row 0
-                5, 6, 7, 8, // row 1
-                9, 10, 11, 12, // row 2
-                13, 14, 15, 16, // row 3
+                1, 2, 3, 4, // row 0: (x2,x3) = (0,0)
+                5, 6, 7, 8, // row 1: (x2,x3) = (0,1)
+                9, 10, 11, 12, // row 2: (x2,x3) = (1,0)
+                13, 14, 15, 16, // row 3: (x2,x3) = (1,1)
             ]
             .into_iter()
             .map(F::from_u8)
             .collect(),
-            4,
+            4, // width (number of columns)
         );
+
+        // Pack the matrix into a unified multilinear domain
         let concat = ConcatMats::new(vec![mat]);
         let meta = &concat.meta;
 
-        // Query: rotate z = [1, 0], rotation = 1
-        let query = MlQuery::EqRotateRight(vec![F::from_u8(1), F::from_u8(0)], 1);
+        // -----------------------------------------------
+        // Query: EqRotateRight(z = [1, 0], rotation = 1)
+        //
+        // This rotates z = [1,0] right by 1 bit → becomes [0,1]
+        //
+        // The rotated z is treated as a Boolean point representing a row index.
+        // So this selects the row (0,1), i.e., row index 1.
+        // -----------------------------------------------
+        let query = MlQuery::EqRotateRight(MultilinearPoint(vec![F::from_u8(1), F::from_u8(0)]), 1);
+
+        // ys: values associated with each row in the matrix.
+        //
+        // These are arbitrary and not derived from the matrix.
+        // For example, suppose the prover computed a polynomial g(x2,x3)
+        // and evaluated it on all 4 rows (x2,x3) ∈ {0,1}^2:
+        //
+        // g(0,0) = 21
+        // g(0,1) = 22
+        // g(1,0) = 23
+        // g(1,1) = 24
+        //
+        // So:
+        // ys = [g(0,0), g(0,1), g(1,0), g(1,1)]
+        // -----------------------------------------------
         let ys = vec![
             F::from_u8(21),
             F::from_u8(22),
             F::from_u8(23),
             F::from_u8(24),
         ];
+
+        // -----------------------------------------------
+        // r: the column selector challenge.
+        // It selects a column via the equality polynomial eq_r
+        //
+        // Since the width is 4, we need 2 bits to index a column:
+        // → x0, x1 index the column domain.
+        // -----------------------------------------------
         let r = vec![F::from_u8(2), F::from_u8(1)];
 
+        // Compute the constraint using meta (on matrix 0)
         let (weights, sum) = meta.constraint(0, &query, &ys, &r);
 
-        // eq_r = eq_{[2,1]} = list of 4 values, based on r
+        // ---------------------------------------------------------
+        // Naively compute eq_r(x) for all x ∈ {0,1}^2, where:
+        // eq_r(x) = ∏_i ((1 - r_i)(1 - x_i) + r_i x_i)
+        // ---------------------------------------------------------
         let eq_r = {
             let r0 = r[0];
             let r1 = r[1];
-            vec![
-                (F::ONE - r0) * (F::ONE - r1),
-                (F::ONE - r0) * r1,
-                r0 * (F::ONE - r1),
-                r0 * r1,
-            ]
+            let mut values = Vec::with_capacity(4);
+            for &x0 in &[F::ZERO, F::ONE] {
+                for &x1 in &[F::ZERO, F::ONE] {
+                    let term0 = (F::ONE - r0) * (F::ONE - x0) + r0 * x0;
+                    let term1 = (F::ONE - r1) * (F::ONE - x1) + r1 * x1;
+                    values.push(term0 * term1);
+                }
+            }
+            values
         };
-        let expected_sum = dot_product(cloned(&ys), cloned(&eq_r[..ys.len()]));
+
+        // Compute expected sum:
+        //
+        // ∑_row ys[row] * eq_r[column selected]
+        // -----------------------------------------------
+        let expected_sum = ys[0] * eq_r[0] + ys[1] * eq_r[1] + ys[2] * eq_r[2] + ys[3] * eq_r[3];
         assert_eq!(sum, expected_sum);
 
         match weights {
@@ -733,9 +814,30 @@ mod tests {
                 let full = weight.evals();
                 assert_eq!(full.len(), 1 << meta.log_b);
 
+                // Pull out the weight range corresponding to matrix 0
                 let expected_weight_range = &full[meta.ranges[0].clone()];
+
+                // mle = query.to_mle(F::ONE)
+                // This gives evaluations of query polynomial on each row (over z-variables)
+                //
+                // Since z = [1,0], rot = 1 → rotated z = [0,1]
                 let mle = query.to_mle(F::ONE);
 
+                // The final weight matrix W is constructed as:
+                //
+                // W[i][j] = mle[i] * eq_r[j]
+                //
+                // Each row corresponds to a row in the matrix
+                // Each column corresponds to a column selected by r
+                //
+                // So expected_weight_range should equal:
+                //
+                // Row 0: mle[0] * eq_r[0], ..., mle[0] * eq_r[3]
+                // Row 1: mle[1] * eq_r[0], ..., mle[1] * eq_r[3]
+                // Row 2: mle[2] * eq_r[0], ..., mle[2] * eq_r[3]
+                // Row 3: mle[3] * eq_r[0], ..., mle[3] * eq_r[3]
+                //
+                // And this is laid out row-major
                 for (row, chunk) in expected_weight_range.chunks(ys.len()).enumerate() {
                     for col in 0..ys.len() {
                         let expected = eq_r[col] * mle[row];
@@ -744,6 +846,229 @@ mod tests {
                 }
             }
             Weights::Evaluation { .. } => panic!("Expected Weights::Linear"),
+        }
+    }
+
+    #[test]
+    fn test_constraint_eq_high_dim_no_rotate_simple() {
+        // -----------------------------------------------------
+        // Construct a 4×4 matrix, flattened row-wise.
+        //
+        // Matrix layout (row-major):
+        // [
+        //   [  1,  2,  3,  4 ],    // row 0
+        //   [  5,  6,  7,  8 ],    // row 1
+        //   [  9, 10, 11, 12 ],    // row 2
+        //   [ 13, 14, 15, 16 ],    // row 3
+        // ]
+        //
+        // We treat this matrix as evaluations of a 4-variable multilinear
+        // polynomial f(x_0,x_1,x_2,x_3) over {0,1}^4, where:
+        //   - (x_0,x_1) index the rows
+        //   - (x_2,x_3) index the columns
+        // -----------------------------------------------------
+        let mat_data = (1u8..=16).map(F::from_u8).collect::<Vec<_>>();
+        let mat = RowMajorMatrix::new(mat_data.clone(), 4); // width = 4
+
+        let concat = ConcatMats::new(vec![mat]);
+        let meta = &concat.meta;
+
+        // -----------------------------------------------------
+        // Define an equality constraint query over rows.
+        //
+        // z = (0, 1) selects the row with bits (x_2, x_3) = (0, 1)
+        // This corresponds to row index = 1 (second row):
+        //     [5, 6, 7, 8]
+        //
+        // Note: meta.log_b = 4 because total input dim is 4 bits.
+        // -----------------------------------------------------
+        let query = MlQuery::Eq(MultilinearPoint(vec![F::ZERO, F::ONE]));
+
+        // -----------------------------------------------------
+        // Select a random challenge r = (1, 2) ∉ {0,1}^2
+        //
+        // This will be used to build eq_r(x_0, x_1), a multilinear
+        // equality polynomial that "selects" a virtual column.
+        // -----------------------------------------------------
+        let r = vec![F::ONE, F::ZERO];
+
+        // -----------------------------------------------------
+        // Extract the corresponding row values
+        // ys = g(0,1,⋅,⋅) = [5, 6, 7, 8]
+        //
+        // These values will be dot-multiplied against eq_r(x)
+        // to produce the expected sum.
+        // -----------------------------------------------------
+        let ys = mat_data[4..8].to_vec(); // row 1
+
+        // -----------------------------------------------------
+        // Call the constraint system to compute:
+        // - weights: either Evaluation or Linear variant
+        // - sum: the weighted sum over the selected row
+        // -----------------------------------------------------
+        let (weights, sum) = meta.constraint(0, &query, &ys, &r);
+
+        // -----------------------------------------------------
+        // The index corresponds to:
+        //   - row : (0, 1) -> row index = 1
+        //   - col : (1, 0) -> column index = 2
+        //
+        // f(0,1,1,0) = 7 (from the matrix)
+        // -----------------------------------------------------
+        assert_eq!(
+            sum,
+            F::from_u64(7),
+            "Sum from constraint does not match expected"
+        );
+
+        // -----------------------------------------------------
+        // Step 8: Evaluate the full matrix at the returned point
+        //
+        // When the system returns Weights::Evaluation, it means
+        // the sum can be viewed as f(point), where f is the full
+        // multilinear extension of the matrix.
+        //
+        // We check that f(0,1,1,0) = 7
+        // -----------------------------------------------------
+        match weights {
+            Weights::Evaluation { point } => {
+                let eval_list = EvaluationsList::new(concat.values.clone());
+                let evaluation_at_point = eval_list.evaluate(&point);
+                assert_eq!(
+                    evaluation_at_point,
+                    F::from_u64(7),
+                    "Multilinear evaluation at point doesn't match expected"
+                );
+            }
+            Weights::Linear { .. } => panic!("Expected Weights::Evaluation from Eq query"),
+        }
+    }
+
+    #[test]
+    fn test_constraint_eq_high_dim_no_rotate() {
+        // -----------------------------------------------------
+        // Construct a 4×4 matrix, flattened row-wise.
+        //
+        // Matrix layout (row-major):
+        // [
+        //   [  1,  2,  3,  4 ],    // row 0
+        //   [  5,  6,  7,  8 ],    // row 1
+        //   [  9, 10, 11, 12 ],    // row 2
+        //   [ 13, 14, 15, 16 ],    // row 3
+        // ]
+        //
+        // We treat this matrix as evaluations of a 4-variable multilinear
+        // polynomial f(x_0,x_1,x_2,x_3) over {0,1}^4, where:
+        //   - (x_0,x_1) index the rows
+        //   - (x_2,x_3) index the columns
+        // -----------------------------------------------------
+        let mat_data = (1u8..=16).map(F::from_u8).collect::<Vec<_>>();
+        let mat = RowMajorMatrix::new(mat_data.clone(), 4); // width = 4
+
+        // To complexify things, we'll also construct a second matrix
+        let mat_data1 = (1u8..=16).map(F::from_u8).collect::<Vec<_>>();
+        let mat1 = RowMajorMatrix::new(mat_data1, 4); // width = 4
+
+        let concat = ConcatMats::new(vec![mat, mat1]);
+        let meta = &concat.meta;
+
+        // -----------------------------------------------------
+        // Define an equality constraint query over rows.
+        //
+        // z = (0, 1) selects the row with bits (x_2, x_3) = (0, 1)
+        // This corresponds to row index = 1 (second row):
+        //     [5, 6, 7, 8]
+        //
+        // Note: meta.log_b = 4 because total input dim is 4 bits.
+        // -----------------------------------------------------
+        let query = MlQuery::Eq(MultilinearPoint(vec![F::ZERO, F::ONE]));
+
+        // -----------------------------------------------------
+        // Select a random challenge r = (1, 2) ∉ {0,1}^2
+        //
+        // This will be used to build eq_r(x_0, x_1), a multilinear
+        // equality polynomial that "selects" a virtual column.
+        // -----------------------------------------------------
+        let r = vec![F::from_u8(1), F::from_u8(2)];
+
+        // -----------------------------------------------------
+        // Extract the corresponding row values
+        // ys = g(0,1,⋅,⋅) = [5, 6, 7, 8]
+        //
+        // These values will be dot-multiplied against eq_r(x)
+        // to produce the expected sum.
+        // -----------------------------------------------------
+        let ys = mat_data[4..8].to_vec(); // row 1
+
+        // -----------------------------------------------------
+        // Call the constraint system to compute:
+        // - weights: either Evaluation or Linear variant
+        // - sum: the weighted sum over the selected row
+        // -----------------------------------------------------
+        let (weights, sum) = meta.constraint(0, &query, &ys, &r);
+
+        // -----------------------------------------------------
+        // Manually evaluate eq_r(x) on all x ∈ {0,1}^2
+        //
+        // eq_r(x) = ∏_i ((1 - r_i)(1 - x_i) + r_i x_i)
+        //
+        // This gives 4 values, one per Boolean point (x_0, x_1):
+        //   - (0, 0)
+        //   - (0, 1)
+        //   - (1, 0)
+        //   - (1, 1)
+        // -----------------------------------------------------
+        let eq_r = {
+            let r0 = r[0];
+            let r1 = r[1];
+            let mut values = Vec::with_capacity(4);
+            for &x0 in &[F::ZERO, F::ONE] {
+                for &x1 in &[F::ZERO, F::ONE] {
+                    let term0 = (F::ONE - r0) * (F::ONE - x0) + r0 * x0;
+                    let term1 = (F::ONE - r1) * (F::ONE - x1) + r1 * x1;
+                    values.push(term0 * term1);
+                }
+            }
+            values
+        };
+
+        // -----------------------------------------------------
+        // Step 7: Manually compute expected sum:
+        //
+        // expected_sum = ∑_{j} ys[j] * eq_r[j]
+        //
+        // where j ∈ {0, 1, 2, 3} are the column indices.
+        // -----------------------------------------------------
+        let expected_sum = ys
+            .iter()
+            .zip(&eq_r)
+            .map(|(y, w)| *y * *w)
+            .fold(F::ZERO, |acc, val| acc + val);
+
+        assert_eq!(
+            sum, expected_sum,
+            "Sum from constraint does not match expected"
+        );
+
+        // -----------------------------------------------------
+        // Step 8: Evaluate the full matrix at the returned point
+        //
+        // When the system returns Weights::Evaluation, it means
+        // the sum can be viewed as f(point), where f is the full
+        // multilinear extension of the matrix.
+        //
+        // We check that f(point) = expected_sum
+        // -----------------------------------------------------
+        match weights {
+            Weights::Evaluation { point } => {
+                let eval_list = EvaluationsList::new(concat.values.clone());
+                let evaluation_at_point = eval_list.evaluate(&point);
+                assert_eq!(
+                    evaluation_at_point, sum,
+                    "Multilinear evaluation at point doesn't match expected"
+                );
+            }
+            Weights::Linear { .. } => panic!("Expected Weights::Evaluation from Eq query"),
         }
     }
 

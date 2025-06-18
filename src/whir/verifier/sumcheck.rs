@@ -78,13 +78,13 @@ where
         // Handle the univariate skip case
         if is_univariate_skip {
             // Read `2^{k+1}` evaluations (size of coset domain) for the skipping polynomial
-            let evals = verifier_state.next_scalars::<{ 1 << (K_SKIP_SUMCHECK + 1) }>()?;
+            let evals = verifier_state.next_scalars_array::<{ 1 << (K_SKIP_SUMCHECK + 1) }>()?;
 
             // Interpolate into a univariate polynomial (over the coset domain)
             let poly = SumcheckPolynomial::new(evals.to_vec(), 1);
 
             // Sample the challenge scalar r₀ ∈ 𝔽 for this round
-            let [rand] = verifier_state.challenge_scalars()?;
+            let [rand] = verifier_state.challenge_scalars_array()?;
 
             // Update the claimed sum using the univariate polynomial and randomness.
             //
@@ -109,7 +109,7 @@ where
 
         for _ in start_round..rounds {
             // Extract the 3 evaluations of the quadratic sumcheck polynomial h(X)
-            let evals = verifier_state.next_scalars::<3>()?;
+            let evals = verifier_state.next_scalars_array::<3>()?;
             let poly = SumcheckPolynomial::new(evals.to_vec(), 1);
 
             // Verify claimed sum is consistent with polynomial
@@ -118,7 +118,7 @@ where
             }
 
             // Sample the next verifier folding randomness rᵢ
-            let [rand] = verifier_state.challenge_scalars()?;
+            let [rand] = verifier_state.challenge_scalars_array()?;
 
             // Update claimed sum using folding randomness
             *claimed_sum = poly.evaluate_at_point(&rand.into());
@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(prover.sum, expected_initial_sum);
 
         // Set up domain separator
-        let mut domsep: DomainSeparator<EF4, F, u8> = DomainSeparator::new("tag");
+        let mut domsep: DomainSeparator<EF4, F, u8> = DomainSeparator::new("tag", true);
 
         let folding_factor = 3;
         let pow_bits = 1.;
@@ -312,7 +312,7 @@ mod tests {
 
         for i in 0..folding_factor {
             // Get the 3 evaluations of sumcheck polynomial h_i(X) at X = 0, 1, 2
-            let sumcheck_evals: [_; 3] = verifier_state.next_scalars().unwrap();
+            let sumcheck_evals: [_; 3] = verifier_state.next_scalars_array().unwrap();
             let poly = SumcheckPolynomial::new(sumcheck_evals.to_vec(), 1);
 
             // Verify sum over Boolean points {0,1} matches current sum
@@ -323,7 +323,7 @@ mod tests {
             );
 
             // Sample random challenge r_i ∈ F and evaluate h_i(r_i)
-            let [r] = verifier_state.challenge_scalars().unwrap();
+            let [r] = verifier_state.challenge_scalars_array().unwrap();
             current_sum = poly.evaluate_at_point(&r.into());
 
             if pow_bits > 0.0 {
@@ -426,7 +426,7 @@ mod tests {
         // - 1 skipped round: 2^k_skip + 1 values
         // - remaining rounds: 3 values each
         // -------------------------------------------------------------
-        let mut domsep: DomainSeparator<EF4, F, u8> = DomainSeparator::new("test");
+        let mut domsep: DomainSeparator<EF4, F, u8> = DomainSeparator::new("test", true);
         domsep.add_scalars(1 << (K_SKIP + 1), "skip");
         domsep.challenge_scalars(1, "skip");
 
@@ -460,9 +460,9 @@ mod tests {
         let mut expected = Vec::new();
 
         // First skipped round (wide DFT LDE)
-        let evals: [_; 1 << (K_SKIP + 1)] = verifier_state.next_scalars().unwrap();
+        let evals: [_; 1 << (K_SKIP + 1)] = verifier_state.next_scalars_array().unwrap();
         let poly = SumcheckPolynomial::new(evals.to_vec(), 1);
-        let [r0] = verifier_state.challenge_scalars().unwrap();
+        let [r0] = verifier_state.challenge_scalars_array().unwrap();
         expected.push((poly, r0));
 
         let mat = RowMajorMatrix::new(evals.to_vec(), 1);
@@ -470,9 +470,9 @@ mod tests {
 
         // Remaining quadratic rounds
         for _ in 0..(NUM_VARS - K_SKIP) {
-            let evals: [_; 3] = verifier_state.next_scalars().unwrap();
+            let evals: [_; 3] = verifier_state.next_scalars_array().unwrap();
             let poly = SumcheckPolynomial::new(evals.to_vec(), 1);
-            let [r] = verifier_state.challenge_scalars().unwrap();
+            let [r] = verifier_state.challenge_scalars_array().unwrap();
             assert_eq!(poly.evaluations()[0] + poly.evaluations()[1], current_sum);
             current_sum = poly.evaluate_at_point(&r.into());
             expected.push((poly, r));
