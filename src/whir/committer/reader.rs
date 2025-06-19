@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
@@ -66,7 +66,7 @@ where
         ood_samples: usize,
     ) -> ProofResult<ParsedCommitment<EF, Hash<F, W, DIGEST_ELEMS>>>
     where
-        F: TwoAdicField + PrimeField64,
+        F: TwoAdicField,
         EF: ExtensionField<F> + TwoAdicField,
         W: Unit + Default + Copy,
         Challenger: CanObserve<W> + CanSample<W>,
@@ -132,7 +132,7 @@ where
 
 impl<'a, EF, F, H, C, PS, Challenger, W> CommitmentReader<'a, EF, F, H, C, PS, Challenger, W>
 where
-    F: Field + TwoAdicField + PrimeField64,
+    F: Field + TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
     W: Unit + Default + Copy,
     Challenger: CanObserve<W> + CanSample<W>,

@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_symmetric::Hash;
 use serde::Deserialize;
 
@@ -11,9 +11,8 @@ use super::{
     pow::traits::PowStrategy,
     sho::ChallengerWithInstructions,
     unit::UnitToBytes,
-    utils::{bytes_uniform_modp, from_be_bytes_mod_order, from_le_bytes_mod_order},
 };
-use crate::fiat_shamir::unit::Unit;
+use crate::fiat_shamir::{unit::Unit, utils::deserialize_field};
 
 /// [`VerifierState`] is the verifier state.
 ///
@@ -57,7 +56,7 @@ where
     U: Unit + Default + Copy,
     Challenger: CanObserve<U> + CanSample<U>,
     EF: ExtensionField<F> + TwoAdicField,
-    F: PrimeField64 + TwoAdicField,
+    F: TwoAdicField,
 {
     /// Creates a new [`VerifierState`] instance with the given sponge and IO Pattern.
     ///
@@ -133,7 +132,9 @@ where
             let byte_buf: &[u8] = U::slice_to_u8_slice(&u_buf);
 
             // Interpret each chunk as a base field coefficient
-            let coeffs = byte_buf.chunks(base_bytes).map(from_le_bytes_mod_order);
+            let coeffs = byte_buf
+                .chunks(base_bytes)
+                .map(|chunck| deserialize_field(chunck).unwrap());
 
             // Reconstruct the field element from its base field coefficients
             *out = EF::from_basis_coefficients_iter(coeffs).unwrap();
@@ -185,30 +186,12 @@ where
 
     /// Sample extension scalars uniformly at random using Fiat-Shamir challenge output.
     pub fn fill_challenge_scalars(&mut self, output: &mut [EF]) -> ProofResult<()> {
-        // How many bytes are needed to sample a single base field element
-        let base_field_size = bytes_uniform_modp(F::bits() as u32);
+        let mut u_buf = vec![U::default(); size_of::<EF>()];
 
-        // Total bytes needed for one EF element = extension degree × base field size
-        let field_unit_len = EF::DIMENSION * base_field_size;
-
-        // Temporary buffer to hold bytes for each field element
-        let mut u_buf = vec![U::default(); field_unit_len];
-
-        // Fill each output element from fresh transcript randomness
         for o in output.iter_mut() {
-            // Draw uniform bytes from the transcript
             self.fill_challenge_units(&mut u_buf)?;
-
-            // Reinterpret as bytes (safe because U must be u8-width)
             let byte_buf = U::slice_to_u8_slice(&u_buf);
-
-            // For each chunk, convert to base field element via modular reduction
-            let base_coeffs = byte_buf
-                .chunks(base_field_size)
-                .map(from_be_bytes_mod_order);
-
-            // Reconstruct the full field element using canonical basis
-            *o = EF::from_basis_coefficients_iter(base_coeffs).unwrap();
+            *o = deserialize_field(byte_buf).unwrap()
         }
 
         Ok(())
@@ -226,34 +209,6 @@ where
         let mut output = EF::zero_vec(n);
         self.fill_challenge_scalars(&mut output)?;
         Ok(output)
-    }
-
-    /// Serialize and observe public scalar values into the sponge, returning their byte encoding.
-    pub fn public_scalars(&mut self, input: &[EF]) -> ProofResult<Vec<u8>> {
-        // Build the byte vector by flattening all basis coefficients.
-        //
-        // For each extension field element:
-        // - Decompose it into its canonical basis over the base field (returns a slice of F coefficients).
-        //
-        // For each base field coefficient:
-        // - Convert it to a canonical little-endian u64 byte array (8 bytes).
-        // - Truncate the byte array to `num_bytes` (only keep the low significant part).
-        // - Collect all these truncated bytes into a flat vector.
-        //
-        // Example:
-        // - BabyBear: one limb → 4 bytes.
-        // - EF4 over BabyBear: 4 limbs → 16 bytes.
-        let bytes: Vec<u8> = input
-            .iter()
-            .flat_map(p3_field::BasedVectorSpace::as_basis_coefficients_slice)
-            .flat_map(|coeff| coeff.as_canonical_u64().to_le_bytes()[..F::NUM_BYTES].to_vec())
-            .collect();
-
-        // Observe the serialized bytes into the Fiat-Shamir transcript sponge
-        self.hash_state.observe(&U::slice_from_u8_slice(&bytes))?;
-
-        // Return the serialized byte representation
-        Ok(bytes)
     }
 
     /// Read a hint from the NARG string. Returns the number of units read.
@@ -336,7 +291,7 @@ where
 #[allow(clippy::unreadable_literal)]
 mod tests {
     use std::cell::RefCell;
-
+use p3_field::PrimeField64;
     use p3_baby_bear::BabyBear;
     use p3_challenger::HashChallenger;
     use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, extension::BinomialExtensionField};
@@ -532,183 +487,6 @@ mod tests {
 
         // Step 7: Ensure the decoded extension field elements match the original values
         assert_eq!(out, values);
-    }
-
-    #[test]
-    fn test_common_field_to_unit_bytes_babybear() {
-        // Generate some random F values
-        let values = [F::from_u64(111), F::from_u64(222)];
-
-        // Create a domain separator indicating we will observe 2 public scalars
-        let mut domsep: DomainSeparator<F, F, u8> = DomainSeparator::new("field", true);
-        domsep.add_scalars(2, "test");
-
-        // Create prover and serialize expected values manually
-        let expected_bytes = [111, 0, 0, 0, 222, 0, 0, 0];
-
-        let challenger = DummyChallenger::new();
-        let mut prover = domsep.to_verifier_state(&[], challenger.clone());
-        let actual = prover.public_scalars(&values).unwrap();
-
-        assert_eq!(
-            actual, expected_bytes,
-            "Public scalars should serialize to expected bytes"
-        );
-
-        // Determinism: same input, same transcript = same output
-        let mut prover2 = domsep.to_verifier_state(&[], challenger);
-        let actual2 = prover2.public_scalars(&values).unwrap();
-
-        assert_eq!(
-            actual, actual2,
-            "Transcript serialization should be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_common_field_to_unit_bytes_goldilocks() {
-        // Generate some random Goldilocks values
-        let values = [G::from_u64(111), G::from_u64(222)];
-
-        // Create a domain separator indicating we will observe 2 public scalars
-        let mut domsep: DomainSeparator<G, G, u8> = DomainSeparator::new("field", true);
-        domsep.add_scalars(2, "test");
-
-        // Create prover and serialize expected values manually
-        let expected_bytes = [111, 0, 0, 0, 0, 0, 0, 0, 222, 0, 0, 0, 0, 0, 0, 0];
-
-        let challenger = DummyChallenger::new();
-        let mut prover = domsep.to_verifier_state(&[], challenger.clone());
-        let actual = prover.public_scalars(&values).unwrap();
-
-        assert_eq!(
-            actual, expected_bytes,
-            "Public scalars should serialize to expected bytes"
-        );
-
-        // Determinism: same input, same transcript = same output
-        let mut prover2 = domsep.to_verifier_state(&[], challenger);
-        let actual2 = prover2.public_scalars(&values).unwrap();
-
-        assert_eq!(
-            actual, actual2,
-            "Transcript serialization should be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_common_field_to_unit_bytes_babybear_extension() {
-        // Construct two extension field elements using known u64 inputs
-        let values = [EF4::from_u64(111), EF4::from_u64(222)];
-
-        // Create a domain separator committing to 2 public scalars
-        let mut domsep: DomainSeparator<EF4, F, u8> = DomainSeparator::new("field", true);
-        domsep.add_scalars(2, "test");
-
-        // Compute expected bytes manually: serialize each coefficient of EF4
-        let expected_bytes = [
-            111, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 222, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
-        ];
-
-        // Serialize the values through the transcript
-        let challenger = DummyChallenger::new();
-        let mut prover = domsep.to_verifier_state(&[], challenger);
-        let actual = prover.public_scalars(&values).unwrap();
-
-        // Check that the actual bytes match expected ones
-        assert_eq!(
-            actual, expected_bytes,
-            "Public scalars should serialize to expected bytes"
-        );
-
-        // Check determinism: same input = same output
-        let challenger = DummyChallenger::new();
-        let mut prover2 = domsep.to_verifier_state(&[], challenger);
-        let actual2 = prover2.public_scalars(&values).unwrap();
-
-        assert_eq!(
-            actual, actual2,
-            "Transcript serialization should be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_common_field_to_unit_bytes_goldilocks_extension() {
-        // Construct two extension field elements using known u64 inputs
-        let values = [EG2::from_u64(111), EG2::from_u64(222)];
-
-        // Create a domain separator committing to 2 public scalars
-        let mut domsep: DomainSeparator<EG2, G, u8> = DomainSeparator::new("field", true);
-        domsep.add_scalars(2, "test");
-
-        // Compute expected bytes manually: serialize each coefficient of EF4
-        let expected_bytes = [
-            111, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 222, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
-        ];
-
-        // Serialize the values through the transcript
-        let challenger = DummyChallenger::new();
-        let mut prover = domsep.to_verifier_state(&[], challenger.clone());
-        let actual = prover.public_scalars(&values).unwrap();
-
-        // Check that the actual bytes match expected ones
-        assert_eq!(
-            actual, expected_bytes,
-            "Public scalars should serialize to expected bytes"
-        );
-
-        // Check determinism: same input = same output
-        let mut prover2 = domsep.to_verifier_state(&[], challenger);
-        let actual2 = prover2.public_scalars(&values).unwrap();
-
-        assert_eq!(
-            actual, actual2,
-            "Transcript serialization should be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_common_field_to_unit_mixed_values() {
-        let values = [F::ZERO, F::ONE, F::from_u64(123456), F::from_u64(7891011)];
-
-        let mut domsep: DomainSeparator<F, F, u8> = DomainSeparator::new("mixed", true);
-        domsep.add_scalars(values.len(), "mix");
-
-        let challenger = DummyChallenger::new();
-        let mut prover = domsep.to_verifier_state(&[], challenger.clone());
-        let actual = prover.public_scalars(&values).unwrap();
-
-        let expected = vec![0, 0, 0, 0, 1, 0, 0, 0, 64, 226, 1, 0, 67, 104, 120, 0];
-
-        assert_eq!(actual, expected, "Mixed values should serialize correctly");
-
-        let mut prover2 = domsep.to_verifier_state(&[], challenger);
-        assert_eq!(
-            actual,
-            prover2.public_scalars(&values).unwrap(),
-            "Serialization must be deterministic"
-        );
-    }
-
-    #[test]
-    fn test_hint_bytes_verifier_valid_hint() {
-        // Domain separator commits to a hint
-        let mut domsep: DomainSeparator<F, F, u8> = DomainSeparator::new("valid", true);
-        domsep.hint("hint");
-
-        let challenger = DummyChallenger::new();
-        let mut prover = domsep.to_prover_state(challenger.clone());
-
-        let hint = b"abc123";
-        prover.hint_bytes(hint).unwrap();
-
-        let narg = prover.narg_string();
-
-        let mut verifier = domsep.to_verifier_state(narg, challenger);
-        let result = verifier.hint_bytes().unwrap();
-        assert_eq!(result, hint);
     }
 
     #[test]

@@ -63,7 +63,7 @@
 // impl<Val, Dft, Hash, Compression, Challenge, Challenger, const DIGEST_ELEMS: usize>
 //     MlPcs<Challenge, Challenger> for WhirPcs<Val, Dft, Hash, Compression, DIGEST_ELEMS>
 // where
-//     Val: TwoAdicField + PrimeField64,
+//     Val: TwoAdicField ,
 //     Dft: TwoAdicSubgroupDft<Val>,
 //     Hash: Sync + CryptographicHasher<Val, [u8; DIGEST_ELEMS]>,
 //     Compression: Sync + PseudoCompressionFunction<[u8; DIGEST_ELEMS], 2>,

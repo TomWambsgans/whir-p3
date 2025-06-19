@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, TwoAdicField};
 use tracing::instrument;
 
 use crate::{
@@ -73,7 +73,7 @@ pub fn sample_ood_points<F, EF, E, Challenger, W>(
     evaluate_fn: E,
 ) -> ProofResult<(Vec<EF>, Vec<EF>)>
 where
-    F: PrimeField64 + TwoAdicField,
+    F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
     E: Fn(&MultilinearPoint<EF>) -> EF,
     W: Unit + Default + Copy,

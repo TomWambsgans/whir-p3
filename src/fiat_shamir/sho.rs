@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, marker::PhantomData};
 
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field,  TwoAdicField};
 
 use super::{
     domain_separator::{DomainSeparator, Op},
@@ -59,7 +59,7 @@ where
     ) -> Self
     where
         EF: ExtensionField<F> + TwoAdicField,
-        F: Field + TwoAdicField + PrimeField64,
+        F: Field + TwoAdicField ,
     {
         let stack = domain_separator.finalize();
         let iop_units = domain_separator.as_units();

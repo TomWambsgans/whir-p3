@@ -1,30 +1,29 @@
-use num_bigint::BigUint;
-use p3_field::PrimeField64;
+use p3_field::Field;
 
-/// Takes a big-endian byte slice and reduces it modulo the field order.
-pub(crate) fn from_be_bytes_mod_order<F: PrimeField64>(bytes: &[u8]) -> F {
-    // Step 1: Interpret input as a BigUint
-    let x = BigUint::from_bytes_be(bytes);
-
-    // Step 2: Compute x mod field modulus
-    let modulus = BigUint::from(F::ORDER_U64);
-    let reduced = x % modulus;
-
-    // Step 3: Convert to field element
-    F::from_u64(reduced.try_into().unwrap())
+pub fn serialize_field<F: Field>(f: &F) -> Vec<u8> {
+    let size = std::mem::size_of::<F>();
+    let mut bytes = Vec::with_capacity(size);
+    unsafe {
+        let src_ptr = f as *const F as *const u8;
+        bytes.set_len(size);
+        std::ptr::copy_nonoverlapping(src_ptr, bytes.as_mut_ptr(), size);
+    }
+    bytes
 }
 
-/// Takes a little-endian byte slice and reduces it modulo the field order.
-pub(crate) fn from_le_bytes_mod_order<F: PrimeField64>(bytes: &[u8]) -> F {
-    // Step 1: Interpret input as a BigUint
-    let x = BigUint::from_bytes_le(bytes);
+pub fn deserialize_field<F: Field>(bytes: &[u8]) -> Option<F> {
+    // TODO check that the representation is correct
+    if bytes.len() != std::mem::size_of::<F>() {
+        return None;
+    }
 
-    // Step 2: Compute x mod field modulus
-    let modulus = BigUint::from(F::ORDER_U64);
-    let reduced = x % modulus;
+    let mut result = std::mem::MaybeUninit::<F>::uninit();
 
-    // Step 3: Convert to field element
-    F::from_u64(reduced.try_into().unwrap())
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), result.as_mut_ptr() as *mut u8, bytes.len());
+
+        Some(result.assume_init())
+    }
 }
 
 /// Bytes needed in order to obtain a uniformly distributed random element of `modulus_bits`

@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, fmt::Write, marker::PhantomData};
 
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 
 use super::{errors::DomainSeparatorMismatch, utils::bytes_uniform_modp};
 use crate::{
@@ -73,7 +73,7 @@ impl<EF, F, U> DomainSeparator<EF, F, U>
 where
     U: Unit + Default + Copy,
     EF: ExtensionField<F> + TwoAdicField,
-    F: Field + TwoAdicField + PrimeField64,
+    F: Field + TwoAdicField,
 {
     #[must_use]
     pub const fn from_string(io: String, verify_operations: bool) -> Self {

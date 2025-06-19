@@ -1,5 +1,5 @@
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::DenseMatrix;
 use p3_merkle_tree::MerkleTree;
 use tracing::{info_span, instrument};
@@ -80,7 +80,7 @@ where
 
 impl<EF, F, W, const DIGEST_ELEMS: usize> RoundState<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>
 where
-    F: Field + TwoAdicField + PrimeField64,
+    F: Field + TwoAdicField ,
     EF: ExtensionField<F> + TwoAdicField,
 {
     /// Initializes the prover’s state for the first round of the WHIR protocol.

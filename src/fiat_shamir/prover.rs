@@ -1,7 +1,7 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field,  TwoAdicField};
 use p3_symmetric::Hash;
 use serde::Serialize;
 
@@ -11,9 +11,11 @@ use super::{
     pow::traits::PowStrategy,
     sho::ChallengerWithInstructions,
     unit::UnitToBytes,
-    utils::{bytes_uniform_modp, from_be_bytes_mod_order},
 };
-use crate::fiat_shamir::unit::Unit;
+use crate::fiat_shamir::{
+    unit::Unit,
+    utils::{deserialize_field, serialize_field},
+};
 
 /// [`ProverState`] is the prover state of an interactive proof (IP) system.
 ///
@@ -54,7 +56,7 @@ where
     U: Unit + Default + Copy,
     Challenger: CanObserve<U> + CanSample<U>,
     EF: ExtensionField<F> + TwoAdicField,
-    F: PrimeField64 + TwoAdicField,
+    F: TwoAdicField,
 {
     /// Initialize a new `ProverState` from the given domain separator.
     ///
@@ -138,11 +140,7 @@ where
         // Example:
         // - BabyBear: one limb → 4 bytes.
         // - EF4 over BabyBear: 4 limbs → 16 bytes.
-        let bytes: Vec<u8> = input
-            .iter()
-            .flat_map(p3_field::BasedVectorSpace::as_basis_coefficients_slice)
-            .flat_map(|c| c.as_canonical_u64().to_le_bytes()[..F::NUM_BYTES].to_vec())
-            .collect();
+        let bytes: Vec<u8> = input.iter().flat_map(|c| serialize_field(c)).collect();
 
         // Observe the serialized bytes into the Fiat-Shamir transcript
         self.public_units(&U::slice_from_u8_slice(&bytes))?;
@@ -196,30 +194,12 @@ where
     ///
     /// Each element is sampled using Fiat-Shamir from the internal sponge.
     pub fn fill_challenge_scalars(&mut self, output: &mut [EF]) -> ProofResult<()> {
-        // How many bytes are needed to sample a single base field element
-        let base_field_size = bytes_uniform_modp(F::bits() as u32);
+        let mut u_buf = vec![U::default(); size_of::<EF>()];
 
-        // Total bytes needed for one EF element = extension degree × base field size
-        let field_unit_len = EF::DIMENSION * base_field_size;
-
-        // Temporary buffer to hold bytes for each field element
-        let mut u_buf = vec![U::default(); field_unit_len];
-
-        // Fill each output element from fresh transcript randomness
         for o in output.iter_mut() {
-            // Draw uniform bytes from the transcript
             self.fill_challenge_units(&mut u_buf)?;
-
-            // Reinterpret as bytes (safe because U must be 1-byte width)
             let byte_buf = U::slice_to_u8_slice(&u_buf);
-
-            // For each chunk, convert to base field element via modular reduction
-            let base_coeffs = byte_buf
-                .chunks(base_field_size)
-                .map(from_be_bytes_mod_order);
-
-            // Reconstruct the full field element using canonical basis
-            *o = EF::from_basis_coefficients_iter(base_coeffs).unwrap();
+            *o = deserialize_field(byte_buf).unwrap()
         }
 
         Ok(())

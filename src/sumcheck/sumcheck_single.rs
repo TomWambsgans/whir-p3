@@ -1,5 +1,5 @@
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_interpolation::interpolate_subgroup;
 use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "parallel")]
@@ -365,7 +365,7 @@ where
         k_skip: Option<usize>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
-        F: PrimeField64 + TwoAdicField,
+        F: TwoAdicField,
         EF: TwoAdicField,
         S: PowStrategy,
         W: Unit + Default + Copy,
@@ -590,6 +590,7 @@ where
 mod tests {
     use p3_baby_bear::BabyBear;
     use p3_challenger::HashChallenger;
+    use p3_field::PrimeField64;
     use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, extension::BinomialExtensionField};
     use p3_interpolation::interpolate_subgroup;
     use p3_keccak::Keccak256Hash;

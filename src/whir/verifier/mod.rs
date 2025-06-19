@@ -2,7 +2,7 @@ use std::{fmt::Debug, ops::Deref};
 
 use p3_challenger::{CanObserve, CanSample};
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
-use p3_field::{ExtensionField, Field, Packable, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, Packable, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
@@ -44,7 +44,7 @@ where
 
 impl<'a, EF, F, H, C, PS, Challenger, W> Verifier<'a, EF, F, H, C, PS, Challenger, W>
 where
-    F: Field + TwoAdicField + PrimeField64,
+    F: Field + TwoAdicField ,
     EF: ExtensionField<F> + TwoAdicField,
     PS: PowStrategy,
     W: Unit + Default + Copy,

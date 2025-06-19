@@ -1,5 +1,5 @@
 use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_interpolation::interpolate_subgroup;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -21,7 +21,7 @@ type SumcheckRandomness<F> = MultilinearPoint<F>;
 impl<EF, F, MyChallenger, C, PS, Challenger, W>
     Verifier<'_, EF, F, MyChallenger, C, PS, Challenger, W>
 where
-    F: Field + TwoAdicField + PrimeField64,
+    F: Field + TwoAdicField ,
     EF: ExtensionField<F> + TwoAdicField,
     PS: PowStrategy,
     W: Unit + Default + Copy,

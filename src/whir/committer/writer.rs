@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use p3_challenger::{CanObserve, CanSample};
 use p3_commit::Mmcs;
-use p3_field::{ExtensionField, Field, Packable, PrimeField64, TwoAdicField};
+use p3_field::{ExtensionField, Field, Packable, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
@@ -35,7 +35,7 @@ where
 
 impl<'a, EF, F, H, C, PS, Challenger, W> CommitmentWriter<'a, EF, F, H, C, PS, Challenger, W>
 where
-    F: Field + TwoAdicField + PrimeField64,
+    F: Field + TwoAdicField ,
     EF: ExtensionField<F> + TwoAdicField,
     W: Unit + Default + Copy,
     Challenger: CanObserve<W> + CanSample<W>,
