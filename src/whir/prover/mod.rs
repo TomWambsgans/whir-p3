@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use p3_challenger::{CanObserve, CanSample};
 use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_field::{ExtensionField, Field, Packable, TwoAdicField};
+use p3_field::{ExtensionField, Field, Packable, PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
@@ -55,7 +55,7 @@ where
 
 impl<EF, F, H, C, PS, Challenger, W> Prover<'_, EF, F, H, C, PS, Challenger, W>
 where
-    F: Field + TwoAdicField ,
+    F: Field + TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
     PS: PowStrategy,
     W: Unit + Default + Copy,
@@ -142,7 +142,7 @@ where
     #[instrument(skip_all)]
     pub fn prove<const DIGEST_ELEMS: usize>(
         &self,
-        dft: &EvalsDft<F>,
+        dft: &EvalsDft<F::PrimeSubfield>,
         prover_state: &mut ProverState<EF, F, Challenger, W>,
         statement: Statement<EF>,
         witness: Witness<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
@@ -152,6 +152,8 @@ where
         C: PseudoCompressionFunction<[W; DIGEST_ELEMS], 2> + Sync,
         [W; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         W: Eq + Packable,
+        <F as PrimeCharacteristicRing>::PrimeSubfield: TwoAdicField,
+        EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
     {
         // Validate parameters
         assert!(
@@ -195,7 +197,7 @@ where
     fn round<const DIGEST_ELEMS: usize>(
         &self,
         round_index: usize,
-        dft: &EvalsDft<F>,
+        dft: &EvalsDft<F::PrimeSubfield>,
         prover_state: &mut ProverState<EF, F, Challenger, W>,
         round_state: &mut RoundState<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
     ) -> ProofResult<()>
@@ -204,6 +206,8 @@ where
         C: PseudoCompressionFunction<[W; DIGEST_ELEMS], 2> + Sync,
         [W; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         W: Eq + Packable,
+           <F as PrimeCharacteristicRing>::PrimeSubfield: TwoAdicField,
+        EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>
     {
         // - If a sumcheck already exists, use its evaluations
         // - Otherwise, fold the evaluations from the previous round

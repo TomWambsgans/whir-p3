@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use p3_challenger::{CanObserve, CanSample};
 use p3_commit::Mmcs;
-use p3_field::{ExtensionField, Field, Packable, TwoAdicField};
+use p3_field::{ExtensionField, Field, Packable, PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
@@ -57,7 +57,7 @@ where
     #[instrument(skip_all)]
     pub fn commit<const DIGEST_ELEMS: usize>(
         &self,
-        dft: &EvalsDft<F>,
+        dft: &EvalsDft<F::PrimeSubfield>,
         prover_state: &mut ProverState<EF, F, Challenger, W>,
         polynomial: EvaluationsList<F>,
     ) -> ProofResult<Witness<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>>
@@ -66,6 +66,8 @@ where
         C: PseudoCompressionFunction<[W; DIGEST_ELEMS], 2> + Sync,
         [W; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         W: Eq + Packable,
+        <F as PrimeCharacteristicRing>::PrimeSubfield: TwoAdicField,
+        F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>
     {
         let evals_repeated = info_span!("repeating evals")
             .in_scope(|| parallel_repeat(polynomial.evals(), 1 << self.starting_log_inv_rate));
@@ -74,7 +76,7 @@ where
         let width = 1 << self.folding_factor.at_round(0);
         let folded_matrix = info_span!("dft", height = evals_repeated.len() / width, width)
             .in_scope(|| {
-                dft.dft_batch_by_evals(RowMajorMatrix::new(evals_repeated, width))
+                dft.dft_algebra_batch_by_evals(RowMajorMatrix::new(evals_repeated, width))
                     .to_row_major_matrix()
             });
 

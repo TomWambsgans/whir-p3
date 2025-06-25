@@ -4,7 +4,7 @@ use clap::Parser;
 use p3_baby_bear::BabyBear;
 use p3_blake3::Blake3;
 use p3_challenger::HashChallenger;
-use p3_field::extension::BinomialExtensionField;
+use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
 use p3_keccak::Keccak256Hash;
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
@@ -28,12 +28,11 @@ use whir_p3::{
     },
 };
 
-// type F = Goldilocks;
-// type EF = BinomialExtensionField<F, 2>;
+type F = BinomialExtensionField<KoalaBear, 4>;
+type EF = BinomialExtensionField<KoalaBear, 4>;
+
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
-type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 4>;
 type ByteHash = Blake3;
 type FieldHash = SerializingHasher<ByteHash>;
 type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
@@ -49,7 +48,7 @@ struct Args {
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "25")]
+    #[arg(short = 'd', long, default_value = "23")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
@@ -164,7 +163,7 @@ fn main() {
     // Commit to the polynomial and produce a witness
     let committer = CommitmentWriter::new(&params);
 
-    let dft = EvalsDft::<F>::new(1 << params.max_fft_size());
+    let dft = EvalsDft::<<F as PrimeCharacteristicRing>::PrimeSubfield>::new(1 << params.max_fft_size());
 
     let time = Instant::now();
     let witness = committer
