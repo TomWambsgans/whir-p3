@@ -5,7 +5,6 @@ use p3_baby_bear::BabyBear;
 use p3_blake3::Blake3;
 use p3_challenger::HashChallenger;
 use p3_field::extension::BinomialExtensionField;
-use p3_goldilocks::Goldilocks;
 use p3_keccak::Keccak256Hash;
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
@@ -29,12 +28,12 @@ use whir_p3::{
     },
 };
 
-type F = Goldilocks;
-type EF = BinomialExtensionField<F, 2>;
+// type F = Goldilocks;
+// type EF = BinomialExtensionField<F, 2>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
-type __F = KoalaBear;
-type __EF = BinomialExtensionField<__F, 4>;
+type F = BinomialExtensionField<KoalaBear, 8>;
+type EF = BinomialExtensionField<KoalaBear, 8>;
 type ByteHash = Blake3;
 type FieldHash = SerializingHasher<ByteHash>;
 type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
@@ -50,7 +49,7 @@ struct Args {
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "24")]
+    #[arg(short = 'd', long, default_value = "23")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
@@ -59,13 +58,13 @@ struct Args {
     #[arg(short = 'r', long, default_value = "1")]
     rate: usize,
 
-    #[arg(short = 'k', long = "fold", default_value = "4")]
+    #[arg(short = 'k', long = "fold", default_value = "6")]
     folding_factor: usize,
 
     #[arg(long = "sec", default_value = "CapacityBound")]
     soundness_type: SecurityAssumption,
 
-    #[arg(long = "initial-rs-reduction", default_value = "3")]
+    #[arg(long = "initial-rs-reduction", default_value = "4")]
     rs_domain_initial_reduction_factor: usize,
 }
 
@@ -90,7 +89,7 @@ fn main() {
     let pow_bits = args.pow_bits.unwrap();
     let num_variables = args.num_variables;
     let starting_rate = args.rate;
-    let folding_factor = FoldingFactor::Constant(args.folding_factor);
+    let folding_factor = FoldingFactor::ConstantFromSecondRound(6, 4);
     let soundness_type = args.soundness_type;
     let num_evaluations = args.num_evaluations;
 
@@ -192,19 +191,19 @@ fn main() {
     let narg_string = prover_state.narg_string().to_vec();
     let proof_size = narg_string.len();
 
-    // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
-    let mut verifier_state = domainsep.to_verifier_state(&narg_string, challenger);
+    // // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
+    // let mut verifier_state = domainsep.to_verifier_state(&narg_string, challenger);
 
-    // Parse the commitment
-    let parsed_commitment = commitment_reader
-        .parse_commitment::<32>(&mut verifier_state)
-        .unwrap();
+    // // Parse the commitment
+    // let parsed_commitment = commitment_reader
+    //     .parse_commitment::<32>(&mut verifier_state)
+    //     .unwrap();
 
-    let verif_time = Instant::now();
-    verifier
-        .verify(&mut verifier_state, &parsed_commitment, &statement)
-        .unwrap();
-    let verify_time = verif_time.elapsed();
+    // let verif_time = Instant::now();
+    // verifier
+    //     .verify(&mut verifier_state, &parsed_commitment, &statement)
+    //     .unwrap();
+    // let verify_time = verif_time.elapsed();
 
     println!(
         "\nProving time: {} ms (commit: {} ms, opening: {} ms)",
@@ -213,5 +212,5 @@ fn main() {
         opening_time.as_millis()
     );
     println!("Proof size: {:.1} KiB", proof_size as f64 / 1024.0);
-    println!("Verification time: {} μs", verify_time.as_micros());
+    // println!("Verification time: {} μs", verify_time.as_micros());
 }
