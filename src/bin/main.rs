@@ -28,8 +28,8 @@ use whir_p3::{
     },
 };
 
-type F = BinomialExtensionField<KoalaBear, 4>;
-type EF = BinomialExtensionField<KoalaBear, 4>;
+type F = BinomialExtensionField<KoalaBear, 8>;
+type EF = BinomialExtensionField<KoalaBear, 8>;
 
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
@@ -48,7 +48,7 @@ struct Args {
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "23")]
+    #[arg(short = 'd', long, default_value = "22")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
@@ -63,7 +63,7 @@ struct Args {
     #[arg(long = "sec", default_value = "CapacityBound")]
     soundness_type: SecurityAssumption,
 
-    #[arg(long = "initial-rs-reduction", default_value = "4")]
+    #[arg(long = "initial-rs-reduction", default_value = "3")]
     rs_domain_initial_reduction_factor: usize,
 }
 
@@ -88,7 +88,7 @@ fn main() {
     let pow_bits = args.pow_bits.unwrap();
     let num_variables = args.num_variables;
     let starting_rate = args.rate;
-    let folding_factor = FoldingFactor::ConstantFromSecondRound(6, 4);
+    let folding_factor = FoldingFactor::ConstantFromSecondRound(5, 4);
     let soundness_type = args.soundness_type;
     let num_evaluations = args.num_evaluations;
 
