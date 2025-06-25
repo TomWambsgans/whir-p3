@@ -32,8 +32,8 @@ use whir_p3::{
 // type EF = BinomialExtensionField<F, 2>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
-type F = BinomialExtensionField<KoalaBear, 8>;
-type EF = BinomialExtensionField<KoalaBear, 8>;
+type F = KoalaBear;
+type EF = BinomialExtensionField<KoalaBear, 4>;
 type ByteHash = Blake3;
 type FieldHash = SerializingHasher<ByteHash>;
 type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
@@ -49,7 +49,7 @@ struct Args {
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "23")]
+    #[arg(short = 'd', long, default_value = "25")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
