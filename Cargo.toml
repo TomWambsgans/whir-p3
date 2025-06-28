@@ -45,6 +45,7 @@ p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b86974
 p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }
 p3-matrix = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }
 p3-commit = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }
+p3-keccak = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }
 p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }
 p3-dft = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }
 p3-util = { git = "https://github.com/Plonky3/Plonky3.git", rev = "b869741" }

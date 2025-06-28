@@ -4,8 +4,8 @@ use clap::Parser;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_field::extension::BinomialExtensionField;
-use p3_goldilocks::{Goldilocks, Poseidon2Goldilocks};
-use p3_koala_bear::KoalaBear;
+use p3_goldilocks::Goldilocks;
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{
     Rng, SeedableRng,
@@ -30,13 +30,13 @@ use whir_p3::{
     },
 };
 
-type F = Goldilocks;
-type EF = BinomialExtensionField<F, 2>;
+type __F = Goldilocks;
+type __EF = BinomialExtensionField<__F, 2>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
-type __F = KoalaBear;
-type __EF = BinomialExtensionField<__F, 4>;
-type Perm = Poseidon2Goldilocks<16>;
+type F = KoalaBear;
+type EF = BinomialExtensionField<F, 4>;
+type Perm = Poseidon2KoalaBear<16>;
 
 type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
 type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
@@ -45,13 +45,13 @@ type MyChallenger = DuplexChallenger<F, Perm, 16, 8>;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short = 'l', long, default_value = "100")]
+    #[arg(short = 'l', long, default_value = "50")]
     security_level: usize,
 
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "24")]
+    #[arg(short = 'd', long, default_value = "25")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
@@ -127,6 +127,8 @@ fn main() {
     };
 
     let params = WhirConfig::<EF, F, MyHash, MyCompress, MyChallenger>::new(mv_params, whir_params);
+
+    // dbg!(&params);
 
     let mut rng = StdRng::seed_from_u64(0);
     let polynomial = EvaluationsList::<F>::new((0..num_coeffs).map(|_| rng.random()).collect());

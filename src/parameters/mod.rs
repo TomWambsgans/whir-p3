@@ -15,8 +15,8 @@ const MAX_NUM_VARIABLES_TO_SEND_COEFFS: usize = 6;
 /// This function determines the PoW security level based on the number of variables
 /// and the logarithmic inverse rate.
 #[must_use]
-pub const fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
-    num_variables + log_inv_rate - 3
+pub const fn default_max_pow(_num_variables: usize, _log_inv_rate: usize) -> usize {
+    20
 }
 
 /// Represents the parameters for a multivariate polynomial.
