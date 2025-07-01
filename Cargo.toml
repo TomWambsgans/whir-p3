@@ -65,6 +65,9 @@ tracing-subscriber = { version = "0.3.17", default-features = false, features = 
 ] }
 rand = "0.9"
 clap = { version = "4.4.17", features = ["derive"] }
+icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle.git", branch="main" }
+icicle-core = { git = "https://github.com/ingonyama-zk/icicle.git", branch="main" }
+icicle-koalabear = { git = "https://github.com/ingonyama-zk/icicle.git", branch="main" }
 
 [dev-dependencies]
 criterion = "0.6"

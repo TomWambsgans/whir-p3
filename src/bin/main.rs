@@ -215,3 +215,39 @@ fn main() {
     );
     println!("Verification time: {} μs", verify_time.as_micros());
 }
+
+#[cfg(test)]
+mod test {
+    use icicle_core::traits::GenerateRandom;
+
+    #[test]
+    fn test_icile_poseidon2() {
+        use icicle_core::hash::HashConfig;
+        use icicle_core::poseidon2::Poseidon2;
+        use icicle_core::traits::FieldImpl;
+        use icicle_koalabear::field::{ScalarCfg, ScalarField};
+        use icicle_runtime::memory::HostSlice;
+
+        let batch = 1 << 18; // Number of hashes to compute in a single batch
+        let t: usize = 16; // Poseidon parameter that specifies the arity (number of inputs) for each hash function
+        let mut outputs = vec![ScalarField::zero(); batch * 4]; // Output array sized for the batch count
+
+        // Case (1): Hashing without a domain tag
+        // Generates 'batch * t' random input elements as each hash needs 't' inputs
+        let inputs = ScalarCfg::generate_random(batch * t);
+        let poseidon_hasher =
+            Poseidon2::new::<ScalarField>(t as u32, None /*=domain-tag*/).unwrap(); // Instantiate Poseidon without domain tag
+
+            dbg!(poseidon_hasher.output_size()); // Output size of the hash function
+
+        let time = std::time::Instant::now();
+        poseidon_hasher
+            .hash(
+                HostSlice::from_slice(&inputs), // Input slice for the hash function
+                &HashConfig::default(),         // Default hashing configuration
+                HostSlice::from_mut_slice(&mut outputs), // Output slice to store hash results
+            )
+            .unwrap();
+        dbg!(time.elapsed());
+    }
+}
