@@ -16,7 +16,7 @@ const MAX_NUM_VARIABLES_TO_SEND_COEFFS: usize = 6;
 /// and the logarithmic inverse rate.
 #[must_use]
 pub const fn default_max_pow(_num_variables: usize, _log_inv_rate: usize) -> usize {
-    20
+    16
 }
 
 /// Represents the parameters for a multivariate polynomial.

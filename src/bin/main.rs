@@ -45,7 +45,7 @@ type MyChallenger = DuplexChallenger<F, Perm, 16, 8>;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short = 'l', long, default_value = "50")]
+    #[arg(short = 'l', long, default_value = "90")]
     security_level: usize,
 
     #[arg(short = 'p', long)]
