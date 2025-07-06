@@ -10,8 +10,8 @@ rust.missing_debug_implementations = "warn"
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = { level = "deny", priority = -1 }
-rustdoc.all = "warn"
 rust.dead_code = "allow"
+rustdoc.all = "warn"
 
 [lints.clippy]
 # all lints that are on by default (correctness, suspicious, style, complexity, perf)
@@ -66,12 +66,7 @@ tracing-subscriber = { version = "0.3.17", default-features = false, features = 
     "env-filter",
 ] }
 rand = "0.9"
-zeroize = { version = "1.8" }
-blake3 = "1.5.4"
-num-bigint = "0.4"
 clap = { version = "4.4.17", features = ["derive"] }
-bincode = { version = "2.0", features = ["serde"] }
-bytemuck = { version = "1.18", features = ["extern_crate_alloc"] }
 
 [dev-dependencies]
 criterion = "0.6"

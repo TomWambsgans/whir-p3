@@ -1,8 +1,10 @@
 pub mod domain_separator;
 pub mod errors;
-pub mod pow;
+pub mod pattern;
 pub mod prover;
-pub mod sho;
-pub mod unit;
-pub mod utils;
 pub mod verifier;
+
+pub trait ChallengSampler<EF> {
+    fn sample(&mut self) -> EF;
+    fn sample_bits(&mut self, bits: usize) -> usize;
+}
