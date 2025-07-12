@@ -31,7 +31,7 @@ use whir_p3::{
 };
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<F, 4>;
+type EF = BinomialExtensionField<F, 8>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
 type __F = Goldilocks;
