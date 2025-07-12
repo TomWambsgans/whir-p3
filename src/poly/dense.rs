@@ -1,4 +1,7 @@
-use std::ops::{Add, AddAssign, Mul, MulAssign};
+use std::{
+    collections::HashSet,
+    ops::{Add, AddAssign, Mul, MulAssign},
+};
 
 use p3_field::{ExtensionField, Field};
 use rand::distr::{Distribution, StandardUniform};
@@ -66,57 +69,105 @@ impl<F: Field> WhirDensePolynomial<F> {
         Self::from_coefficients_vec((0..=degree).map(|_| rng.random()).collect())
     }
 
-    /// Given a set of n pairs (x_i, y_i): computes the polynomial P verifying P(x_i) = y_i for all i,
-    /// of degree at most n-1.
+    /// Constructs the unique interpolating polynomial `P(x)` such that:
     ///
-    /// Returns `None` if there exists i < j such that x_i == x_j
+    /// \begin{equation}
+    /// P(x_i) = y_i \quad \text{for each } (x_i, y_i) \text{ in the input set}
+    /// \end{equation}
+    ///
+    /// The result is a dense univariate polynomial of degree at most `n - 1`, where `n` is the number of input points.
+    ///
+    /// # Parameters
+    ///
+    /// - `values`: A slice of `(x_i, y_i)` pairs, where each `x_i` is a field element from `S`,
+    ///   and each `y_i` is an extension field element from `F`.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(P)`: The interpolating polynomial if all `x_i` are distinct.
+    /// - `None`: If any duplicate `x_i` values exist (even with equal `y_i`).
     pub fn lagrange_interpolation<S>(values: &[(S, F)]) -> Option<Self>
     where
         S: Field,
         F: ExtensionField<S>,
     {
+        // The number of (x, y) pairs to interpolate.
         let n = values.len();
-        let mut result = vec![F::ZERO; n];
 
-        for i in 0..n {
-            let (x_i, y_i) = values[i];
-            let mut term = vec![F::ZERO; n];
-            let mut product = F::ONE;
-
-            for (j, (x_j, _)) in values.iter().enumerate().take(n) {
-                if i != j {
-                    product *= (x_i - *x_j).try_inverse()?;
-                }
-            }
-
-            term[0] = product * y_i;
-            for (j, (x_j, _)) in values.iter().enumerate().take(n) {
-                if i != j {
-                    let mut new_term = term.clone();
-                    for k in (1..n).rev() {
-                        new_term[k] = new_term[k - 1];
-                    }
-                    new_term[0] = F::ZERO;
-
-                    for k in 0..n {
-                        term[k] = term[k] * (-*x_j) + new_term[k];
-                    }
-                }
-            }
-
-            for j in 0..n {
-                result[j] += term[j];
-            }
+        // Special case: no points => return the zero polynomial.
+        if n == 0 {
+            return Some(Self::default());
         }
 
-        Some(Self::from_coefficients_vec(result))
+        // Check for duplicate x-coordinates
+        //
+        // We use a HashSet to track x_i values. If any duplicates exist, we cannot interpolate.
+        let mut unique_x = HashSet::with_capacity(n);
+        if !values.iter().all(|(x, _)| unique_x.insert(*x)) {
+            return None; // Found a duplicate x_i
+        }
+
+        // Initialize result and basis polynomials
+
+        // The result polynomial P(x) starts at zero and is updated iteratively.
+        let mut result_poly = Self::default();
+
+        // The basis polynomial B(x) starts at 1.
+        // After i steps, B(x) = (x - x_0)(x - x_1)...(x - x_{i-1})
+        let mut basis_poly = Self::from_coefficients_vec(vec![F::ONE]);
+
+        // Newton-style interpolation loop
+        for (x_i, y_i) in values.iter().take(n) {
+            // Promote x_i to the extension field for evaluation
+            let x_i_ext = F::from(*x_i);
+
+            // Compute current prediction: P(x_i)
+            let current_y = result_poly.evaluate(x_i_ext);
+
+            // Compute the discrepancy: how far off our polynomial is
+            let delta = *y_i - current_y;
+
+            // Compute B(x_i), the value of the basis at x_i
+            let basis_eval = basis_poly.evaluate(x_i_ext);
+
+            // The scalar coefficient c_i is the correction needed:
+            // c_i = (y_i - P(x_i)) / B(x_i)
+            let c_i = delta
+                * basis_eval
+                    .try_inverse()
+                    .expect("x_i was checked to be unique");
+
+            // Form term = c_i · B(x)
+
+            // Multiply all coefficients of B(x) by c_i
+            let mut term_coeffs = basis_poly.coeffs.clone();
+            for coeff in &mut term_coeffs {
+                *coeff *= c_i;
+            }
+
+            // Convert the coefficient vector into a polynomial
+            let term = Self::from_coefficients_vec(term_coeffs);
+
+            // Add the term to the result: P(x) := P(x) + c_i · B(x)
+            result_poly += &term;
+
+            // Update B(x) := B(x) · (x - x_i)
+
+            // Monomial: (x - x_i) = -x_i + x = [-x_i, 1]
+            let monomial = Self::from_coefficients_slice(&[-x_i_ext, F::ONE]);
+
+            // Multiply current basis polynomial by the monomial
+            basis_poly = &basis_poly * &monomial;
+        }
+
+        Some(result_poly)
     }
 }
 
 impl<F: Field> Add for &WhirDensePolynomial<F> {
     type Output = WhirDensePolynomial<F>;
 
-    // Adds two dense polynomials and returns the resulting polynomial.
+    /// Adds two dense polynomials and returns the resulting polynomial.
     ///
     /// This function computes the sum of `self` and `other` by adding their
     /// coefficients term by term. If the polynomials have different lengths,
@@ -410,6 +461,117 @@ mod tests {
             // If the Lagrange interpolation is correct, the reconstructed polynomial
             // should be exactly the same as the randomly generated one.
             prop_assert_eq!(interpolated, pol);
+        }
+    }
+
+    /// Builds a strategy that yields random dense polynomials over `F`.
+    ///
+    /// Each polynomial’s degree is chosen uniformly from `max_deg` (exclusive),
+    /// then its coefficients are sampled as `u64` values and lifted into `F`
+    /// via `F::from_u64`.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_deg`: an exclusive upper bound on the degree.
+    ///   Degrees will be drawn from `0..max_deg`; a sampled degree `d`
+    ///   yields a polynomial of degree exactly `d` (with `d+1` coefficients).
+    ///
+    /// # Returns
+    ///
+    /// A `proptest::Strategy` producing `WhirDensePolynomial<F>` instances.
+    fn any_polynomial(
+        max_deg: std::ops::Range<usize>,
+    ) -> impl Strategy<Value = WhirDensePolynomial<F>> {
+        max_deg
+            // 1. Pick a random degree `deg` in 0..max_deg
+            .prop_flat_map(move |deg| {
+                // 2. Generate exactly `deg + 1` raw `u64` values
+                prop::collection::vec(any::<u64>(), deg + 1)
+            })
+            // 3. Convert each `u64` into `F` and build the polynomial
+            .prop_map(|coeffs_u64| {
+                let coeffs_f = coeffs_u64.into_iter().map(F::from_u64).collect();
+                WhirDensePolynomial::from_coefficients_vec(coeffs_f)
+            })
+    }
+
+    proptest! {
+        /// (a + b) + c == a + (b + c)
+        #[test]
+        fn prop_add_associative(
+            // three random polys of small degree for speed
+            a in any_polynomial(0..5),
+            b in any_polynomial(0..5),
+            c in any_polynomial(0..5),
+        ) {
+            let lhs = &(&a + &b) + &c;
+            let rhs = &a + &(&b + &c);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// a + b == b + a
+        #[test]
+        fn prop_add_commutative(
+            a in any_polynomial(0..5),
+            b in any_polynomial(0..5),
+        ) {
+            prop_assert_eq!(&a + &b, &b + &a);
+        }
+
+        /// 0 is the additive identity: a + 0 == a
+        #[test]
+        #[allow(clippy::redundant_clone)]
+        fn prop_add_identity(
+            a in any_polynomial(0..5),
+        ) {
+            let zero = WhirDensePolynomial::<F>::default();
+            prop_assert_eq!(&a + &zero, a.clone());
+            prop_assert_eq!(&zero + &a, a);
+        }
+
+        /// (a * b) * c == a * (b * c)
+        #[test]
+        fn prop_mul_associative(
+            a in any_polynomial(0..5),
+            b in any_polynomial(0..5),
+            c in any_polynomial(0..5),
+        ) {
+            let lhs = &(&a * &b) * &c;
+            let rhs = &a * &(&b * &c);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// a * b == b * a
+        #[test]
+        fn prop_mul_commutative(
+            a in any_polynomial(0..5),
+            b in any_polynomial(0..5),
+        ) {
+            prop_assert_eq!(&a * &b, &b * &a);
+        }
+
+        /// 1 is the multiplicative identity: a * 1 == a
+        #[test]
+        #[allow(clippy::redundant_clone)]
+        fn prop_mul_identity(
+            a in any_polynomial(0..5),
+        ) {
+            // Build the constant-1 polynomial
+            let one = WhirDensePolynomial::from_coefficients_vec(vec![F::ONE]);
+            prop_assert_eq!(&a * &one, a.clone());
+            prop_assert_eq!(&one * &a, a);
+        }
+
+        /// Distributivity: a * (b + c) == a*b + a*c
+        #[test]
+        fn prop_distributive(
+            a in any_polynomial(0..5),
+            b in any_polynomial(0..5),
+            c in any_polynomial(0..5),
+        ) {
+            let lhs = &a * &(&b + &c);
+            let rhs = &(&a * &b) + &(&a * &c);
+            prop_assert_eq!(lhs, rhs);
         }
     }
 }

@@ -1,14 +1,11 @@
 use itertools::Itertools;
-use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
+use p3_challenger::{FieldChallenger, GrindingChallenger};
+use p3_field::{ExtensionField, Field};
+use p3_util::log2_ceil_usize;
 use tracing::instrument;
 
 use crate::{
-    fiat_shamir::{
-        errors::ProofResult,
-        prover::ProverState,
-        unit::{Unit, UnitToBytes},
-    },
+    fiat_shamir::{ChallengSampler, errors::ProofResult, prover::ProverState},
     poly::multilinear::MultilinearPoint,
 };
 
@@ -24,67 +21,68 @@ pub const fn workload_size<T: Sized>() -> usize {
     L1_CACHE_SIZE / size_of::<T>()
 }
 
-/// Generates a list of unique challenge queries within a folded domain.
+/// Samples a list of unique query indices from a folded evaluation domain, using transcript randomness.
 ///
-/// Given a `domain_size` and `folding_factor`, this function:
-/// - Computes the folded domain size: `folded_domain_size = domain_size / 2^folding_factor`.
-/// - Derives query indices from random transcript bytes.
-/// - Deduplicates indices while preserving order.
-pub fn get_challenge_stir_queries<T, W>(
+/// This function is used to select random query locations for verifying proximity to a folded codeword.
+/// The folding reduces the domain size exponentially (e.g. by 2^folding_factor), so we sample indices
+/// in the reduced "folded" domain.
+///
+/// ## Parameters
+/// - `domain_size`: The size of the original evaluation domain (e.g., 2^22).
+/// - `folding_factor`: The number of folding rounds applied (e.g., k = 1 means domain halves).
+/// - `num_queries`: The number of query *indices* we want to obtain.
+/// - `challenger`: A Fiat–Shamir transcript used to sample randomness deterministically.
+///
+/// ## Returns
+/// A sorted and deduplicated list of random query indices in the folded domain.
+pub fn get_challenge_stir_queries<Chal: ChallengSampler<EF>, F, EF>(
     domain_size: usize,
     folding_factor: usize,
     num_queries: usize,
-    narg_string: &mut T,
+    prover_state: &mut Chal,
 ) -> ProofResult<Vec<usize>>
 where
-    T: UnitToBytes<W>,
-    W: Unit + Default + Copy,
+    F: Field,
+    EF: ExtensionField<F>,
 {
+    // Folded domain size = domain_size / 2^folding_factor.
     let folded_domain_size = domain_size >> folding_factor;
-    // Compute required bytes per index: `domain_size_bytes = ceil(log2(folded_domain_size) / 8)`
-    let domain_size_bytes = ((folded_domain_size * 2 - 1).ilog2() as usize).div_ceil(8);
 
-    // Allocate space for query bytes
-    let mut queries = vec![W::default(); num_queries * domain_size_bytes];
-    narg_string.fill_challenge_units(&mut queries)?;
+    // Number of bits needed to represent an index in the folded domain.
+    let domain_size_bits = log2_ceil_usize(folded_domain_size);
 
-    // Convert bytes into indices in **one efficient pass**
-    Ok(queries
-        .chunks_exact(domain_size_bytes)
-        .map(|chunk| {
-            chunk
-                .iter()
-                .fold(0usize, |acc, &b| (acc << 8) | W::to_u8(b) as usize)
-                % folded_domain_size
-        })
+    // Sample one integer per query, each with domain_size_bits of entropy.
+    let queries = (0..num_queries)
+        .map(|_| prover_state.sample_bits(domain_size_bits) % folded_domain_size)
         .sorted_unstable()
         .dedup()
-        .collect())
+        .collect();
+
+    Ok(queries)
 }
 
 /// A utility function to sample Out-of-Domain (OOD) points and evaluate them.
 ///
 /// This should be used on the prover side.
 #[instrument(skip_all)]
-pub fn sample_ood_points<F, EF, E, Challenger, W>(
-    prover_state: &mut ProverState<EF, F, Challenger, W>,
+pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E, Challenger>(
+    prover_state: &mut ProverState<F, EF, Challenger>,
     num_samples: usize,
     num_variables: usize,
     evaluate_fn: E,
-) -> ProofResult<(Vec<EF>, Vec<EF>)>
+) -> (Vec<EF>, Vec<EF>)
 where
-    F: PrimeField64 + TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
     E: Fn(&MultilinearPoint<EF>) -> EF,
-    W: Unit + Default + Copy,
-    Challenger: CanObserve<W> + CanSample<W>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
     let mut ood_points = EF::zero_vec(num_samples);
     let mut ood_answers = Vec::with_capacity(num_samples);
 
     if num_samples > 0 {
         // Generate OOD points from ProverState randomness
-        prover_state.fill_challenge_scalars(&mut ood_points)?;
+        for ood_point in &mut ood_points {
+            *ood_point = prover_state.sample();
+        }
 
         // Evaluate the function at each OOD point
         ood_answers.extend(ood_points.iter().map(|ood_point| {
@@ -94,9 +92,8 @@ where
             ))
         }));
 
-        // Commit the answers to the narg_string
-        prover_state.add_scalars(&ood_answers)?;
+        prover_state.add_extension_scalars(&ood_answers);
     }
 
-    Ok((ood_points, ood_answers))
+    (ood_points, ood_answers)
 }

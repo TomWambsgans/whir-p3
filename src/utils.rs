@@ -1,7 +1,8 @@
 use p3_field::{
-    Algebra, ExtensionField, Field, PackedFieldExtension, PackedValue, PrimeCharacteristicRing,
+    Algebra, BasedVectorSpace, ExtensionField, Field, PackedFieldExtension, PackedValue,
+    PrimeCharacteristicRing,
 };
-use p3_util::log2_strict_usize;
+use p3_util::{iter_array_chunks_padded, log2_strict_usize};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -432,65 +433,58 @@ fn eval_eq_packed<F: Field, EF: ExtensionField<F>, const INITIALIZED: bool>(
 
     match eval.len() {
         0 => {
-            // TODO: Going to add something to Plonky3 to make this more efficient.
-            // Will let us add using the in-built packings.
-            EF::ExtensionPacking::to_ext_iter([scalar])
-                .zip(out.iter_mut())
-                .for_each(|(scalar, out)| {
-                    if INITIALIZED {
-                        *out += scalar;
-                    } else {
-                        *out = scalar;
-                    }
-                });
+            let result: Vec<EF> = EF::ExtensionPacking::to_ext_iter([scalar]).collect();
+            if INITIALIZED {
+                EF::add_slices(out, &result);
+            } else {
+                out.copy_from_slice(&result);
+            }
         }
         1 => {
             // Manually unroll for single variable case
             let eq_evaluations = eval_eq_1(eval, scalar);
 
-            // TODO: Going to add something to Plonky3 to make this more efficient.
-            // Will let us add using the in-built packings.
-            EF::ExtensionPacking::to_ext_iter(eq_evaluations)
-                .zip(out.iter_mut())
-                .for_each(|(scalar, out)| {
-                    if INITIALIZED {
-                        *out += scalar;
-                    } else {
-                        *out = scalar;
-                    }
-                });
+            let result: Vec<EF> = EF::ExtensionPacking::to_ext_iter(eq_evaluations).collect();
+            if INITIALIZED {
+                EF::add_slices(out, &result);
+            } else {
+                out.copy_from_slice(&result);
+            }
         }
         2 => {
             // Manually unroll for two variables case
             let eq_evaluations = eval_eq_2(eval, scalar);
 
-            // TODO: Going to add something to Plonky3 to make this more efficient.
-            // Will let us add using the in-built packings.
-            EF::ExtensionPacking::to_ext_iter(eq_evaluations)
-                .zip(out.iter_mut())
-                .for_each(|(scalar, out)| {
-                    if INITIALIZED {
-                        *out += scalar;
-                    } else {
-                        *out = scalar;
-                    }
-                });
+            let result: Vec<EF> = EF::ExtensionPacking::to_ext_iter(eq_evaluations).collect();
+            if INITIALIZED {
+                EF::add_slices(out, &result);
+            } else {
+                out.copy_from_slice(&result);
+            }
         }
         3 => {
+            const EVAL_LEN: usize = 8;
+
             // Manually unroll for single variable case
             let eq_evaluations = eval_eq_3(eval, scalar);
 
-            // TODO: Going to add something to Plonky3 to make this more efficient.
-            // Will let us add using the in-built packings.
-            EF::ExtensionPacking::to_ext_iter(eq_evaluations)
-                .zip(out.iter_mut())
-                .for_each(|(scalar, out)| {
-                    if INITIALIZED {
-                        *out += scalar;
-                    } else {
-                        *out = scalar;
-                    }
-                });
+            // Unpack the evaluations back into EF elements and add to output.
+            // We use `iter_array_chunks_padded` to allow us to use `add_slices` without
+            // needing a vector allocation. Note that `eq_evaluations: [EF::ExtensionPacking: 8]`
+            // so we know that `out.len() = 8 * F::Packing::WIDTH` meaning we can use `chunks_exact_mut`
+            // and `iter_array_chunks_padded` will never actually pad anything.
+            iter_array_chunks_padded::<_, EVAL_LEN>(
+                EF::ExtensionPacking::to_ext_iter(eq_evaluations),
+                EF::ZERO,
+            )
+            .zip(out.chunks_exact_mut(EVAL_LEN))
+            .for_each(|(res, out_chunk)| {
+                if INITIALIZED {
+                    EF::add_slices(out_chunk, &res);
+                } else {
+                    out_chunk.copy_from_slice(&res);
+                }
+            });
         }
         _ => {
             let (&x, tail) = eval.split_first().unwrap();
@@ -721,6 +715,26 @@ where
         // x_i = 1 part (new subproblem starts at 0)
         eval_eq_chunked(tail, high_chunk, s1, 0);
     }
+}
+
+pub fn flatten_scalars_to_base<F: Field, EF: ExtensionField<F>>(scalars: &[EF]) -> Vec<F> {
+    scalars
+        .iter()
+        .flat_map(BasedVectorSpace::as_basis_coefficients_slice)
+        .copied()
+        .collect()
+}
+
+pub fn pack_scalars_to_extension<F: Field, EF: ExtensionField<F>>(scalars: &[F]) -> Vec<EF> {
+    let extension_size = <EF as BasedVectorSpace<F>>::DIMENSION;
+    assert!(
+        scalars.len() % extension_size == 0,
+        "Scalars length must be a multiple of the extension size"
+    );
+    scalars
+        .chunks_exact(extension_size)
+        .map(|chunk| EF::from_basis_coefficients_slice(chunk).unwrap())
+        .collect()
 }
 
 /// Returns a vector of uninitialized elements of type `A` with the specified length.

@@ -1,15 +1,17 @@
-use p3_challenger::{CanObserve, CanSample};
-use p3_field::{ExtensionField, Field, PrimeField64, TwoAdicField};
+use std::sync::Arc;
+
+use p3_challenger::{FieldChallenger, GrindingChallenger};
+use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::dense::DenseMatrix;
 use p3_merkle_tree::MerkleTree;
 use tracing::{info_span, instrument};
 
-use super::{Leafs, Proof, Prover};
+use super::Prover;
 use crate::{
     domain::Domain,
-    fiat_shamir::{errors::ProofResult, pow::traits::PowStrategy, prover::ProverState, unit::Unit},
-    poly::{evals::EvaluationStorage, multilinear::MultilinearPoint},
-    sumcheck::sumcheck_single::SumcheckSingle,
+    fiat_shamir::{errors::ProofResult, prover::ProverState},
+    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    sumcheck::{K_SKIP_SUMCHECK, sumcheck_single::SumcheckSingle},
     whir::{
         committer::{RoundMerkleTree, Witness},
         statement::{Statement, weights::Weights},
@@ -29,7 +31,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct RoundState<EF, F, W, M, const DIGEST_ELEMS: usize>
 where
-    F: Field + TwoAdicField,
+    F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
 {
     /// The domain used in this round, including the size and generator.
@@ -46,27 +48,15 @@ where
 
     /// The multilinear polynomial evaluations at the start of this round.
     /// These are updated by folding the previous round’s coefficients using `folding_randomness`.
-    pub(crate) evaluations: EvaluationStorage<F, EF>,
+    pub(crate) initial_evaluations: Option<EvaluationsList<F>>,
 
     /// Merkle commitment prover data for the **base field** polynomial from the first round.
     /// This is used to open values at queried locations.
-    pub(crate) commitment_merkle_prover_data: MerkleTree<F, W, M, DIGEST_ELEMS>,
+    pub(crate) commitment_merkle_prover_data: Arc<MerkleTree<F, W, M, DIGEST_ELEMS>>,
 
     /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
     /// Present only after the first round.
     pub(crate) merkle_prover_data: Option<RoundMerkleTree<F, EF, W, DIGEST_ELEMS>>,
-
-    /// Merkle proof from the initial commitment round.
-    /// - First: list of opened leaf values in the base field.
-    /// - Second: corresponding Merkle authentication paths.
-    /// - Empty during setup; populated during final query phase.
-    pub(crate) commitment_merkle_proof: Option<(Leafs<F>, Proof<W, DIGEST_ELEMS>)>,
-
-    /// Merkle proofs for intermediate folded rounds.
-    /// Each entry contains:
-    /// - The opened values at verifier-chosen locations,
-    /// - The corresponding authentication paths.
-    pub(crate) merkle_proofs: Vec<(Leafs<EF>, Proof<W, DIGEST_ELEMS>)>,
 
     /// Flat vector of challenge values used across all rounds.
     /// Populated progressively as folding randomness is sampled.
@@ -78,9 +68,10 @@ where
     pub(crate) statement: Statement<EF>,
 }
 
-impl<EF, F, W, const DIGEST_ELEMS: usize> RoundState<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>
+#[allow(clippy::mismatching_type_param_order)]
+impl<EF, F, const DIGEST_ELEMS: usize> RoundState<EF, F, F, DenseMatrix<F>, DIGEST_ELEMS>
 where
-    F: Field + TwoAdicField + PrimeField64,
+    F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
 {
     /// Initializes the prover’s state for the first round of the WHIR protocol.
@@ -103,16 +94,14 @@ where
     /// This function should be called once at the beginning of the proof, before entering the
     /// main WHIR folding loop.
     #[instrument(skip_all)]
-    pub(crate) fn initialize_first_round_state<MyChallenger, C, PS, Challenger>(
-        prover: &Prover<'_, EF, F, MyChallenger, C, PS, Challenger, W>,
-        prover_state: &mut ProverState<EF, F, Challenger, W>,
+    pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
+        prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
+        prover_state: &mut ProverState<F, EF, Challenger>,
         mut statement: Statement<EF>,
-        witness: Witness<EF, F, W, DenseMatrix<F>, DIGEST_ELEMS>,
+        witness: Witness<EF, F, DenseMatrix<F>, DIGEST_ELEMS>,
     ) -> ProofResult<Self>
     where
-        PS: PowStrategy,
-        W: Unit + Default + Copy,
-        Challenger: CanObserve<W> + CanSample<W>,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
     {
         // Convert witness ood_points into constraints
         let new_constraints = witness
@@ -134,7 +123,7 @@ where
         let folding_randomness = if prover.initial_statement {
             // If there is initial statement, then we run the sum-check for
             // this initial statement.
-            let [combination_randomness_gen] = prover_state.challenge_scalars_array()?;
+            let combination_randomness_gen: EF = prover_state.sample();
 
             // Create the sumcheck prover
             let mut sumcheck = SumcheckSingle::from_base_evals(
@@ -144,11 +133,15 @@ where
             );
 
             // Compute sumcheck polynomials and return the folding randomness values
-            let folding_randomness = sumcheck.compute_sumcheck_polynomials::<PS, _, _>(
+            let folding_randomness = sumcheck.compute_sumcheck_polynomials(
                 prover_state,
                 prover.folding_factor.at_round(0),
                 prover.starting_folding_pow_bits,
-                None,
+                if prover.univariate_skip {
+                    Some(K_SKIP_SUMCHECK)
+                } else {
+                    None
+                },
             )?;
 
             sumcheck_prover = Some(sumcheck);
@@ -158,11 +151,11 @@ where
             // initial rounds of the sum-check, and the verifier directly sends
             // the initial folding randomnesses.
             let mut folding_randomness = EF::zero_vec(prover.folding_factor.at_round(0));
-            prover_state.fill_challenge_scalars(&mut folding_randomness)?;
-
-            if prover.starting_folding_pow_bits > 0. {
-                prover_state.challenge_pow::<PS>(prover.starting_folding_pow_bits)?;
+            for folded_randomness in &mut folding_randomness {
+                *folded_randomness = prover_state.sample();
             }
+
+            prover_state.pow_grinding(prover.starting_folding_pow_bits);
             MultilinearPoint(folding_randomness)
         };
         let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
@@ -172,15 +165,16 @@ where
             randomness_vec
         });
 
+        let initial_evaluations = sumcheck_prover
+            .as_ref()
+            .map_or(Some(witness.polynomial), |_| None);
         Ok(Self {
             domain: prover.starting_domain.clone(),
             sumcheck_prover,
             folding_randomness,
-            evaluations: EvaluationStorage::Base(witness.polynomial),
+            initial_evaluations,
             merkle_prover_data: None,
             commitment_merkle_prover_data: witness.prover_data,
-            commitment_merkle_proof: None,
-            merkle_proofs: vec![],
             randomness_vec,
             statement,
         })
@@ -189,17 +183,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use p3_baby_bear::BabyBear;
-    use p3_blake3::Blake3;
-    use p3_challenger::HashChallenger;
+    use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
+    use p3_challenger::DuplexChallenger;
     use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
-    use p3_keccak::Keccak256Hash;
-    use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
+    use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     use super::*;
     use crate::{
         dft::EvalsDft,
-        fiat_shamir::{domain_separator::DomainSeparator, pow::blake3::Blake3PoW},
+        fiat_shamir::domain_separator::DomainSeparator,
         parameters::{
             FoldingFactor, MultivariateParameters, ProtocolParameters, errors::SecurityAssumption,
         },
@@ -207,17 +200,18 @@ mod tests {
             coeffs::CoefficientList,
             evals::{EvaluationStorage, EvaluationsList},
         },
-        whir::{W, WhirConfig, committer::writer::CommitmentWriter},
+        whir::{WhirConfig, committer::writer::CommitmentWriter},
     };
 
     type F = BabyBear;
     type EF4 = BinomialExtensionField<F, 4>;
-    type ByteHash = Blake3;
-    type FieldHash = SerializingHasher<ByteHash>;
-    type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
-    type MyChallenger = HashChallenger<u8, Keccak256Hash, 32>;
+    type Perm = Poseidon2BabyBear<16>;
 
-    const DIGEST_ELEMS: usize = 32;
+    type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
+    type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
+    type MyChallenger = DuplexChallenger<F, Perm, 16, 8>;
+
+    const DIGEST_ELEMS: usize = 8;
 
     /// Create a WHIR protocol configuration for test scenarios.
     ///
@@ -234,10 +228,16 @@ mod tests {
         initial_statement: bool,
         folding_factor: usize,
         pow_bits: usize,
-    ) -> WhirConfig<EF4, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, W> {
+    ) -> WhirConfig<EF4, F, MyHash, MyCompress, MyChallenger> {
         // Construct the multivariate parameter set with `num_variables` variables,
         // determining the size of the evaluation domain.
         let mv_params = MultivariateParameters::<EF4>::new(num_variables);
+
+        let mut rng = SmallRng::seed_from_u64(1);
+        let perm = Perm::new_from_rng_128(&mut rng);
+
+        let merkle_hash = MyHash::new(perm.clone());
+        let merkle_compress = MyCompress::new(perm);
 
         // Define the core protocol parameters for WHIR, customizing behavior based
         // on whether to start with an initial sumcheck and how to fold the polynomial.
@@ -247,10 +247,11 @@ mod tests {
             pow_bits,
             rs_domain_initial_reduction_factor: 1,
             folding_factor: FoldingFactor::Constant(folding_factor),
-            merkle_hash: FieldHash::new(ByteHash {}),
-            merkle_compress: MyCompress::new(ByteHash {}),
+            merkle_hash,
+            merkle_compress,
             soundness_type: SecurityAssumption::CapacityBound,
             starting_log_inv_rate: 1,
+            univariate_skip: false,
         };
 
         // Combine the multivariate and protocol parameters into a full WHIR config
@@ -268,26 +269,27 @@ mod tests {
     /// This is used as a boilerplate step before running the first WHIR round.
     #[allow(clippy::type_complexity)]
     fn setup_domain_and_commitment(
-        params: &WhirConfig<EF4, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, W>,
+        params: &WhirConfig<EF4, F, MyHash, MyCompress, MyChallenger>,
         poly: EvaluationsList<F>,
     ) -> (
-        DomainSeparator<EF4, F, u8>,
-        ProverState<EF4, F, MyChallenger, W>,
-        Witness<EF4, F, u8, DenseMatrix<F>, DIGEST_ELEMS>,
+        DomainSeparator<EF4, F>,
+        ProverState<F, EF4, MyChallenger>,
+        Witness<EF4, F, DenseMatrix<F>, DIGEST_ELEMS>,
     ) {
         // Create a new Fiat-Shamir domain separator.
-        let mut domsep = DomainSeparator::new("🌪️", true);
+        let mut domsep = DomainSeparator::new(vec![]);
 
         // Observe the public statement into the transcript for binding.
-        domsep.commit_statement(params);
+        domsep.commit_statement::<_, _, _, 8>(params);
 
         // Reserve transcript space for WHIR proof messages.
-        domsep.add_whir_proof(params);
+        domsep.add_whir_proof::<_, _, _, 8>(params);
 
-        let challenger = MyChallenger::new(vec![], Keccak256Hash);
+        let mut rng = SmallRng::seed_from_u64(1);
+        let challenger = MyChallenger::new(Perm::new_from_rng_128(&mut rng));
 
         // Convert the domain separator into a mutable prover-side transcript.
-        let mut prover_state = domsep.to_prover_state(challenger);
+        let mut prover_state = domsep.to_prover_state::<_>(challenger);
 
         // Create a committer using the protocol configuration (Merkle parameters, hashers, etc.).
         let committer = CommitmentWriter::new(params);
@@ -351,10 +353,6 @@ mod tests {
 
         // Since this is the first round, no Merkle data for folded rounds should exist
         assert!(state.merkle_prover_data.is_none());
-
-        // No Merkle proofs should have been generated yet
-        assert!(state.commitment_merkle_proof.is_none());
-        assert!(state.merkle_proofs.is_empty());
     }
 
     #[test]
@@ -471,10 +469,6 @@ mod tests {
 
         // No folded Merkle tree data should exist at this point
         assert!(state.merkle_prover_data.is_none());
-
-        // No authentication paths should be produced yet
-        assert!(state.commitment_merkle_proof.is_none());
-        assert!(state.merkle_proofs.is_empty());
     }
 
     #[test]
@@ -489,7 +483,7 @@ mod tests {
         let poly = EvaluationsList::new(vec![F::ZERO; 1 << num_variables]);
 
         // Generate domain separator, prover state, and Merkle commitment witness for the poly
-        let (_, mut prover_state, witness) = setup_domain_and_commitment(&config, poly.clone());
+        let (_, mut prover_state, witness) = setup_domain_and_commitment(&config, poly);
 
         // Create a new statement with multiple constraints
         let mut statement = Statement::<EF4>::new(num_variables);
@@ -546,7 +540,7 @@ mod tests {
         );
 
         // Coefficients should match the original zero polynomial
-        assert_eq!(state.evaluations, EvaluationStorage::Base(poly));
+        assert!(state.initial_evaluations.is_none());
 
         // Domain must match the WHIR config's expected size
         assert_eq!(
@@ -556,10 +550,6 @@ mod tests {
 
         // No Merkle commitment data for folded rounds yet
         assert!(state.merkle_prover_data.is_none());
-
-        // No Merkle proofs or openings have been generated yet
-        assert!(state.commitment_merkle_proof.is_none());
-        assert!(state.merkle_proofs.is_empty());
     }
 
     #[test]
@@ -608,7 +598,7 @@ mod tests {
         );
 
         // Set up Fiat-Shamir domain and produce commitment + witness
-        let (_, mut prover_state, witness) = setup_domain_and_commitment(&config, poly.clone());
+        let (_, mut prover_state, witness) = setup_domain_and_commitment(&config, poly);
 
         // Run the first round initialization
         let state = RoundState::initialize_first_round_state(
@@ -652,7 +642,7 @@ mod tests {
         }
 
         // Evaluation storage must match original polynomial
-        assert_eq!(state.evaluations, EvaluationStorage::Base(poly));
+        assert!(state.initial_evaluations.is_none());
 
         // Domain should match expected size and rate
         assert_eq!(
@@ -662,10 +652,6 @@ mod tests {
 
         // No Merkle tree data has been created for folded rounds yet
         assert!(state.merkle_prover_data.is_none());
-
-        // No Merkle proofs have been emitted at this stage
-        assert!(state.commitment_merkle_proof.is_none());
-        assert!(state.merkle_proofs.is_empty());
 
         // The randomness_vec must contain the sampled folding randomness, reversed and zero-padded
         assert_eq!(

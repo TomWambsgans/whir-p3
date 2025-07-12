@@ -1,16 +1,18 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use p3_blake3::Blake3;
-use p3_challenger::HashChallenger;
+use p3_challenger::DuplexChallenger;
 use p3_field::extension::BinomialExtensionField;
-use p3_goldilocks::Goldilocks;
-use p3_keccak::Keccak256Hash;
-use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use p3_goldilocks::Poseidon2Goldilocks;
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
+use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
+use rand::{
+    Rng, SeedableRng,
+    rngs::{SmallRng, StdRng},
+};
 use whir_p3::{
     dft::EvalsDft,
-    fiat_shamir::{domain_separator::DomainSeparator, pow::blake3::Blake3PoW},
+    fiat_shamir::domain_separator::DomainSeparator,
     parameters::{
-        FoldingFactor, MultivariateParameters, ProtocolParameters, default_max_pow,
+        DEFAULT_MAX_POW, FoldingFactor, MultivariateParameters, ProtocolParameters,
         errors::SecurityAssumption,
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
@@ -22,22 +24,25 @@ use whir_p3::{
     },
 };
 
-type F = Goldilocks;
-type EF = BinomialExtensionField<F, 2>;
-type ByteHash = Blake3;
-type FieldHash = SerializingHasher<ByteHash>;
-type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
-type MyChallenger = HashChallenger<u8, Keccak256Hash, 32>;
-type W = u8;
+type F = KoalaBear;
+type EF = BinomialExtensionField<F, 4>;
+type Perm = Poseidon2Goldilocks<16>;
+
+type Poseidon16 = Poseidon2KoalaBear<16>;
+type Poseidon24 = Poseidon2KoalaBear<24>;
+
+type MerkleHash = PaddingFreeSponge<Poseidon24, 24, 16, 8>; // leaf hashing
+type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 compression
+type MyChallenger = DuplexChallenger<F, Poseidon16, 16, 8>;
 
 #[allow(clippy::type_complexity)]
 fn prepare_inputs() -> (
-    WhirConfig<EF, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, u8>,
+    WhirConfig<EF, F, MerkleHash, MerkleCompress, MyChallenger>,
     EvalsDft<F>,
     EvaluationsList<F>,
     Statement<EF>,
     MyChallenger,
-    DomainSeparator<EF, F, W>,
+    DomainSeparator<EF, F>,
 ) {
     // Protocol parameter configuration
 
@@ -48,7 +53,7 @@ fn prepare_inputs() -> (
     let num_variables = 24;
 
     // Number of PoW bits required, computed based on the domain size and rate.
-    let pow_bits = default_max_pow(num_variables, 1);
+    let pow_bits = DEFAULT_MAX_POW;
 
     // Folding factor `k`: number of variables folded per round in the sumcheck.
     let folding_factor = FoldingFactor::Constant(4);
@@ -65,15 +70,18 @@ fn prepare_inputs() -> (
     let mv_params = MultivariateParameters::<EF>::new(num_variables);
 
     // Define the hash functions for Merkle tree and compression.
-    let byte_hash = ByteHash {}; // Underlying byte-level hash
-    let merkle_hash = FieldHash::new(byte_hash); // Field-capable hasher for Merkle tree
-    let merkle_compress = MyCompress::new(byte_hash); // 2-to-1 hash for Merkle tree compression
+    let mut rng = SmallRng::seed_from_u64(1);
+    let poseidon16 = Poseidon16::new_from_rng_128(&mut rng);
+    let poseidon24 = Poseidon24::new_from_rng_128(&mut rng);
+
+    let merkle_hash = MerkleHash::new(poseidon24);
+    let merkle_compress = MerkleCompress::new(poseidon16.clone());
 
     // Type of soundness assumption used in the IOP model.
     let soundness_type = SecurityAssumption::CapacityBound;
 
     // Assemble the protocol-level parameters.
-    let whir_params = ProtocolParameters::<_, _> {
+    let whir_params = ProtocolParameters {
         initial_statement: true,
         security_level,
         pow_bits,
@@ -83,13 +91,11 @@ fn prepare_inputs() -> (
         soundness_type,
         starting_log_inv_rate: starting_rate,
         rs_domain_initial_reduction_factor,
+        univariate_skip: false,
     };
 
     // Combine multivariate and protocol parameters into a unified WHIR config.
-    let params = WhirConfig::<EF, F, FieldHash, MyCompress, Blake3PoW, MyChallenger, u8>::new(
-        mv_params,
-        whir_params,
-    );
+    let params = WhirConfig::new(mv_params, whir_params);
 
     // Sample random multilinear polynomial
 
@@ -120,14 +126,14 @@ fn prepare_inputs() -> (
     // Fiat-Shamir setup
 
     // Create a domain separator for transcript hashing.
-    let mut domainsep = DomainSeparator::new("🌪️", true);
+    let mut domainsep = DomainSeparator::new(vec![]);
 
     // Commit protocol parameters and proof type to the domain separator.
-    domainsep.commit_statement(&params);
-    domainsep.add_whir_proof(&params);
+    domainsep.commit_statement::<_, _, _, 32>(&params);
+    domainsep.add_whir_proof::<_, _, _, 32>(&params);
 
     // Instantiate the Fiat-Shamir challenger from an empty seed and Keccak.
-    let challenger = MyChallenger::new(vec![], Keccak256Hash);
+    let challenger = MyChallenger::new(poseidon16);
 
     // DFT backend setup
 

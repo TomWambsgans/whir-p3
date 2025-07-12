@@ -10,14 +10,7 @@ pub mod errors;
 /// the prover sends directly the coefficients of the polynomial.
 const MAX_NUM_VARIABLES_TO_SEND_COEFFS: usize = 6;
 
-/// Computes the default maximum proof-of-work (PoW) bits.
-///
-/// This function determines the PoW security level based on the number of variables
-/// and the logarithmic inverse rate.
-#[must_use]
-pub const fn default_max_pow(num_variables: usize, log_inv_rate: usize) -> usize {
-    num_variables + log_inv_rate - 3
-}
+pub const DEFAULT_MAX_POW: usize = 16;
 
 /// Represents the parameters for a multivariate polynomial.
 #[derive(Debug, Clone, Copy)]
@@ -199,6 +192,8 @@ pub struct ProtocolParameters<H, C> {
     pub merkle_hash: H,
     /// Compression method used in the Merkle tree.
     pub merkle_compress: C,
+    /// Whether the univariate skip optimization is enabled for the sumcheck protocol.
+    pub univariate_skip: bool,
 }
 
 impl<H, C> Display for ProtocolParameters<H, C> {
@@ -219,17 +214,6 @@ impl<H, C> Display for ProtocolParameters<H, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_default_max_pow() {
-        // Basic cases
-        assert_eq!(default_max_pow(10, 3), 10); // 10 + 3 - 3 = 10
-        assert_eq!(default_max_pow(5, 2), 4); // 5 + 2 - 3 = 4
-
-        // Edge cases
-        assert_eq!(default_max_pow(1, 3), 1); // Smallest valid input
-        assert_eq!(default_max_pow(0, 3), 0); // Zero variables (should not happen in practice)
-    }
 
     #[test]
     fn test_multivariate_parameters() {
