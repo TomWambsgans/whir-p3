@@ -1,6 +1,6 @@
 use p3_field::Field;
 
-use crate::{poly::evals::EvaluationsList, whir::Weights};
+use crate::{poly::evals::EvaluationsList, whir::statement::weights::Weights,};
 
 /// Represents a single constraint in a polynomial statement.
 #[derive(Clone, Debug)]
@@ -37,10 +37,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     use super::*;
-    use crate::{
-        poly::{coeffs::CoefficientList, evals::EvaluationsList},
-        whir::MultilinearPoint,
-    };
+    use crate::poly::{coeffs::CoefficientList, evals::EvaluationsList, multilinear::MultilinearPoint};
 
     type F = BabyBear;
 

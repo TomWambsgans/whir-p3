@@ -3,7 +3,7 @@ use std::time::Instant;
 use clap::Parser;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::{PrimeField64, extension::BinomialExtensionField};
+use p3_field::{Field, PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
@@ -15,7 +15,7 @@ use tracing_forest::{ForestLayer, util::LevelFilter};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::{
     dft::EvalsDft,
-    fiat_shamir::domain_separator::DomainSeparator,
+    fiat_shamir::{prover::ProverState, verifier::VerifierState},
     parameters::{
         DEFAULT_MAX_POW, FoldingFactor, MultivariateParameters, ProtocolParameters,
         errors::SecurityAssumption,
@@ -31,7 +31,7 @@ use whir_p3::{
 };
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<F, 8>;
+type EF = BinomialExtensionField<KoalaBear, 4>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
 type __F = Goldilocks;
@@ -42,7 +42,8 @@ type Poseidon24 = Poseidon2KoalaBear<24>;
 
 type MerkleHash = PaddingFreeSponge<Poseidon24, 24, 16, 8>; // leaf hashing
 type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 compression
-type MyChallenger = DuplexChallenger<F, Poseidon16, 16, 8>;
+type MyChallenger =
+    DuplexChallenger<<F as PrimeCharacteristicRing>::PrimeSubfield, Poseidon16, 16, 8>;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -151,9 +152,6 @@ fn main() {
     }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
-    let mut domainsep = DomainSeparator::new(vec![]);
-    domainsep.commit_statement::<_, _, _, 32>(&params);
-    domainsep.add_whir_proof::<_, _, _, 32>(&params);
 
     println!("=========================================");
     println!("Whir (PCS) 🌪️");
@@ -164,12 +162,13 @@ fn main() {
     let challenger = MyChallenger::new(poseidon16);
 
     // Initialize the Merlin transcript from the IOPattern
-    let mut prover_state = domainsep.to_prover_state(challenger.clone());
+    let mut prover_state = ProverState::new(challenger.clone());
 
     // Commit to the polynomial and produce a witness
     let committer = CommitmentWriter::new(&params);
 
-    let dft = EvalsDft::<F>::new(1 << params.max_fft_size());
+    let dft =
+        EvalsDft::<<F as PrimeCharacteristicRing>::PrimeSubfield>::new(1 << params.max_fft_size());
 
     let time = Instant::now();
     let witness = committer
@@ -194,8 +193,7 @@ fn main() {
     let verifier = Verifier::new(&params);
 
     // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
-    let mut verifier_state =
-        domainsep.to_verifier_state(prover_state.proof_data().to_vec(), challenger);
+    let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
     let parsed_commitment = commitment_reader
@@ -214,7 +212,7 @@ fn main() {
         commit_time.as_millis(),
         opening_time.as_millis()
     );
-    let proof_size = prover_state.proof_data().len() as f64 * (F::ORDER_U64 as f64).log2() / 8.0;
+    let proof_size = prover_state.proof_data().len() as f64 * F::bits() as f64 / 8.0;
     println!("proof size: {:.2} KiB", proof_size / 1024.0);
     println!("Verification time: {} μs", verify_time.as_micros());
 }

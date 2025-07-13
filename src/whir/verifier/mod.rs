@@ -2,7 +2,7 @@ use std::{fmt::Debug, ops::Deref};
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
@@ -21,7 +21,7 @@ use crate::{
         verifier::VerifierState,
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    whir::{Statement, parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds},
+    whir::{parameters::WhirConfig, statement::Statement, verifier::sumcheck::verify_sumcheck_rounds},
 };
 
 pub mod sumcheck;
@@ -41,9 +41,14 @@ where
 
 impl<'a, EF, F, H, C, Challenger> Verifier<'a, EF, F, H, C, Challenger>
 where
+    EF: ExtensionField<F>,
+    F: Field,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    <F as PrimeCharacteristicRing>::PrimeSubfield: TwoAdicField,
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    EF: TwoAdicField,
 {
     pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
         Self(params)
@@ -54,13 +59,13 @@ where
     pub fn verify<const DIGEST_ELEMS: usize>(
         &self,
         verifier_state: &mut VerifierState<F, EF, Challenger>,
-        parsed_commitment: &ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>,
+        parsed_commitment: &ParsedCommitment<EF, Hash<F::PrimeSubfield, F::PrimeSubfield, DIGEST_ELEMS>>,
         statement: &Statement<EF>,
     ) -> ProofResult<(MultilinearPoint<EF>, Vec<EF>)>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<F::PrimeSubfield, [F::PrimeSubfield; DIGEST_ELEMS]> + Sync,
+        C: PseudoCompressionFunction<[F::PrimeSubfield; DIGEST_ELEMS], 2> + Sync,
+        [F::PrimeSubfield; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // During the rounds we collect constraints, combination randomness, folding randomness
         // and we update the claimed sum of constraint evaluation.
@@ -270,18 +275,18 @@ where
         &self,
         verifier_state: &mut VerifierState<F, EF, Challenger>,
         params: &RoundConfig<EF>,
-        commitment: &ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>,
+        commitment: &ParsedCommitment<EF, Hash<F::PrimeSubfield, F::PrimeSubfield, DIGEST_ELEMS>>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Constraint<EF>>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<F::PrimeSubfield, [F::PrimeSubfield; DIGEST_ELEMS]> + Sync,
+        C: PseudoCompressionFunction<[F::PrimeSubfield; DIGEST_ELEMS], 2> + Sync,
+        [F::PrimeSubfield; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let leafs_base_field = round_index == 0;
 
-        let stir_challenges_indexes = get_challenge_stir_queries(
+        let stir_challenges_indexes = get_challenge_stir_queries::<_, F, EF>(
             params.domain_size,
             params.folding_factor,
             params.num_queries,
@@ -349,16 +354,16 @@ where
     pub fn verify_merkle_proof<const DIGEST_ELEMS: usize>(
         &self,
         verifier_state: &mut VerifierState<F, EF, Challenger>,
-        root: &Hash<F, F, DIGEST_ELEMS>,
+        root: &Hash<F::PrimeSubfield, F::PrimeSubfield, DIGEST_ELEMS>,
         indices: &[usize],
         dimensions: &[Dimensions],
         leafs_base_field: bool,
         round_index: usize,
     ) -> ProofResult<Vec<Vec<EF>>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<F::PrimeSubfield, [F::PrimeSubfield; DIGEST_ELEMS]> + Sync,
+        C: PseudoCompressionFunction<[F::PrimeSubfield; DIGEST_ELEMS], 2> + Sync,
+        [F::PrimeSubfield; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Create a Merkle MMCS instance
         let mmcs = MerkleTreeMmcs::new(self.merkle_hash.clone(), self.merkle_compress.clone());
@@ -380,7 +385,7 @@ where
             for _ in 0..indices.len() {
                 let mut merkle_path = vec![];
                 for _ in 0..self.merkle_tree_height(round_index) {
-                    let digest: [F; DIGEST_ELEMS] = verifier_state
+                    let digest: [F::PrimeSubfield; DIGEST_ELEMS] = verifier_state
                         .receive_hint_base_scalars(DIGEST_ELEMS)?
                         .try_into()
                         .unwrap();
@@ -422,7 +427,7 @@ where
             for _ in 0..indices.len() {
                 let mut merkle_path = vec![];
                 for _ in 0..self.merkle_tree_height(round_index) {
-                    let digest: [F; DIGEST_ELEMS] = verifier_state
+                    let digest: [F::PrimeSubfield; DIGEST_ELEMS] = verifier_state
                         .receive_hint_base_scalars(DIGEST_ELEMS)?
                         .try_into()
                         .unwrap();

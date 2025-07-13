@@ -1,9 +1,6 @@
-pub mod domain_separator;
 pub mod errors;
 pub mod pattern;
 pub mod prover;
-#[cfg(test)]
-mod tests;
 pub mod verifier;
 
 /// A trait for types that can sample challenges in a Fiat-Shamir-based protocol.

@@ -80,19 +80,3 @@ rayon = ["dep:rayon"]
 [profile.profiling]
 inherits = "release"
 debug = true
-
-[[bench]]
-name = "whir"
-harness = false
-
-[[bench]]
-name = "wavelet"
-harness = false
-
-[[bench]]
-name = "evaluate"
-harness = false
-
-[[bench]]
-name = "lagrange"
-harness = false

@@ -1,9 +1,8 @@
 use std::fmt::Debug;
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{ExtensionField, Field};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
-use super::domain_separator::DomainSeparator;
 use crate::{fiat_shamir::ChallengSampler, utils::flatten_scalars_to_base};
 
 /// State held by the prover in a Fiat-Shamir protocol.
@@ -16,14 +15,14 @@ use crate::{fiat_shamir::ChallengSampler, utils::flatten_scalars_to_base};
 pub struct ProverState<F, EF, Challenger>
 where
     F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
 {
     /// Cryptographic challenger used to sample challenges and observe data.
     challenger: Challenger,
 
     /// Transcript data (proof data) accumulated during protocol execution,
     /// to be sent to the verifier.
-    proof_data: Vec<F>,
+    proof_data: Vec<F::PrimeSubfield>,
 
     /// Marker to keep track of the extension field type without storing it explicitly.
     _extension_field: std::marker::PhantomData<EF>,
@@ -33,7 +32,9 @@ impl<F, EF, Challenger> ProverState<F, EF, Challenger>
 where
     EF: ExtensionField<F>,
     F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
 {
     /// Create a new prover state with a given domain separator and challenger.
     ///
@@ -44,12 +45,10 @@ where
     /// # Returns
     /// A fresh `ProverState` ready to accumulate data.
     #[must_use]
-    pub fn new(domain_separator: &DomainSeparator<EF, F>, mut challenger: Challenger) -> Self
+    pub fn new(challenger: Challenger) -> Self
     where
         Challenger: Clone,
     {
-        challenger.observe_slice(&domain_separator.as_field_elements());
-
         Self {
             challenger,
             proof_data: Vec::new(),
@@ -60,7 +59,7 @@ where
     /// Access all proof data accumulated so far.
     ///
     /// This data will be sent to the verifier as part of the proof.
-    pub fn proof_data(&self) -> &[F] {
+    pub fn proof_data(&self) -> &[F::PrimeSubfield] {
         &self.proof_data
     }
 
@@ -68,12 +67,12 @@ where
     ///
     /// # Arguments
     /// - `scalars`: Slice of base field elements to append.
-    pub fn add_base_scalars(&mut self, scalars: &[F]) {
+    pub fn add_base_scalars(&mut self, scalars: &[F::PrimeSubfield]) {
         // Extend the proof data vector with these scalars.
         self.proof_data.extend(scalars);
 
         // Notify the challenger that these scalars have been committed.
-        self.challenger.observe_slice(scalars);
+        self.challenger.observe_slice(&scalars);
     }
 
     /// Append extension field scalars to the transcript.
@@ -102,7 +101,7 @@ where
     ///
     /// # Arguments
     /// - `scalars`: Slice of base field elements to append.
-    pub fn hint_base_scalars(&mut self, scalars: &[F]) {
+    pub fn hint_base_scalars(&mut self, scalars: &[F::PrimeSubfield]) {
         // Only extend proof data, no challenger observation.
         self.proof_data.extend(scalars);
     }
@@ -113,7 +112,7 @@ where
     /// - `scalars`: Slice of extension field elements to append.
     pub fn hint_extension_scalars(&mut self, scalars: &[EF]) {
         // Flatten extension field scalars and append as base field scalars.
-        self.proof_data.extend(flatten_scalars_to_base(scalars));
+        self.proof_data.extend(flatten_scalars_to_base::<F::PrimeSubfield, EF>(scalars));
     }
 
     /// Sample a new random extension field element from the challenger.
@@ -157,7 +156,9 @@ impl<F, EF, Challenger> ChallengSampler<EF> for ProverState<F, EF, Challenger>
 where
     EF: ExtensionField<F>,
     F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
 {
     fn sample(&mut self) -> EF {
         self.sample()

@@ -1,7 +1,6 @@
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{BasedVectorSpace, ExtensionField, Field};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing};
 
-use super::domain_separator::DomainSeparator;
 use crate::{
     fiat_shamir::{ChallengSampler, errors::ProofError},
     utils::pack_scalars_to_extension,
@@ -15,13 +14,13 @@ use crate::{
 pub struct VerifierState<F, EF, Challenger>
 where
     F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
 {
     /// Cryptographic challenger used for sampling challenges and observing proof data.
     challenger: Challenger,
 
     /// Proof data buffer received from the prover, in base field elements.
-    proof_data: Vec<F>,
+    proof_data: Vec<F::PrimeSubfield>,
 
     /// Current read index into `proof_data`.
     index: usize,
@@ -32,9 +31,11 @@ where
 
 impl<F, EF, Challenger> VerifierState<F, EF, Challenger>
 where
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
     EF: ExtensionField<F>,
     F: Field,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
 {
     /// Create a new verifier state using the given domain separator and proof data.
     ///
@@ -46,15 +47,7 @@ where
     /// # Returns
     /// A new `VerifierState` ready to consume proof data and derive challenges.
     #[must_use]
-    pub fn new(
-        domain_separator: &DomainSeparator<EF, F>,
-        proof_data: Vec<F>,
-        mut challenger: Challenger,
-    ) -> Self {
-        // Observe the domain separator elements to initialize the challenger consistently.
-        let iop_units = domain_separator.as_field_elements();
-        challenger.observe_slice(&iop_units);
-
+    pub fn new(proof_data: Vec<F::PrimeSubfield>, challenger: Challenger) -> Self {
         Self {
             challenger,
             proof_data,
@@ -70,7 +63,7 @@ where
     ///
     /// # Errors
     /// Returns `ProofError::ExceededTranscript` if insufficient data remains.
-    pub fn next_base_scalars_vec(&mut self, n: usize) -> Result<Vec<F>, ProofError> {
+    pub fn next_base_scalars_vec(&mut self, n: usize) -> Result<Vec<F::PrimeSubfield>, ProofError> {
         // Check that enough data remains to read `n` elements.
         if n > self.proof_data.len() - self.index {
             return Err(ProofError::ExceededTranscript);
@@ -90,7 +83,7 @@ where
     ///
     /// # Errors
     /// Returns `ProofError::ExceededTranscript` if insufficient data remains.
-    pub fn next_base_scalars_const<const N: usize>(&mut self) -> Result<[F; N], ProofError> {
+    pub fn next_base_scalars_const<const N: usize>(&mut self) -> Result<[F::PrimeSubfield; N], ProofError> {
         // Delegate to vector-based reader, then convert to array.
         Ok(self.next_base_scalars_vec(N)?.try_into().unwrap())
     }
@@ -104,7 +97,7 @@ where
     /// Returns `ProofError::ExceededTranscript` if insufficient data remains.
     pub fn next_extension_scalars_vec(&mut self, n: usize) -> Result<Vec<EF>, ProofError> {
         // Calculate number of base scalars per extension scalar.
-        let extension_size = <EF as BasedVectorSpace<F>>::DIMENSION;
+        let extension_size = <EF as BasedVectorSpace<F::PrimeSubfield>>::DIMENSION;
 
         // Read and pack into extension elements.
         Ok(pack_scalars_to_extension(
@@ -135,7 +128,7 @@ where
     ///
     /// # Errors
     /// Returns `ProofError::ExceededTranscript` if insufficient data remains.
-    pub fn receive_hint_base_scalars(&mut self, n: usize) -> Result<Vec<F>, ProofError> {
+    pub fn receive_hint_base_scalars(&mut self, n: usize) -> Result<Vec<F::PrimeSubfield>, ProofError> {
         // Check that enough data remains to read `n` elements.
         if n > self.proof_data.len() - self.index {
             return Err(ProofError::ExceededTranscript);
@@ -156,7 +149,7 @@ where
     /// # Errors
     /// Returns `ProofError::ExceededTranscript` if insufficient data remains.
     pub fn receive_hint_extension_scalars(&mut self, n: usize) -> Result<Vec<EF>, ProofError> {
-        let extension_size = <EF as BasedVectorSpace<F>>::DIMENSION;
+        let extension_size = <EF as BasedVectorSpace<F::PrimeSubfield>>::DIMENSION;
 
         // Read and pack into extension elements without challenger observation.
         Ok(pack_scalars_to_extension(
@@ -219,7 +212,9 @@ impl<F, EF, Challenger> ChallengSampler<EF> for VerifierState<F, EF, Challenger>
 where
     EF: ExtensionField<F>,
     F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
 {
     fn sample(&mut self) -> EF {
         self.sample()

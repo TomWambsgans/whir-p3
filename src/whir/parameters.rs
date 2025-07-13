@@ -1,7 +1,7 @@
 use std::{any::TypeId, f64::consts::LOG2_10, marker::PhantomData};
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 
 use crate::{
     domain::Domain,
@@ -70,9 +70,13 @@ where
 
 impl<EF, F, Hash, C, Challenger> WhirConfig<EF, F, Hash, C, Challenger>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+       EF: ExtensionField<F>,
+    F: Field,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    F::PrimeSubfield: TwoAdicField,
+    EF: TwoAdicField
 {
     #[allow(clippy::too_many_lines)]
     pub fn new(
@@ -110,7 +114,7 @@ where
             let first_fft_size = mv_parameters.num_variables + log_inv_rate
                 - whir_parameters.folding_factor.at_round(0);
             assert!(
-                first_fft_size <= F::TWO_ADICITY,
+                first_fft_size <= F::PrimeSubfield::TWO_ADICITY,
                 "Increase the initial folding factor, otherwise the FFT twiddles will be in the extension field"
             );
         }

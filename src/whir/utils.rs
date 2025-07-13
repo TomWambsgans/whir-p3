@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{ExtensionField, Field};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use p3_util::log2_ceil_usize;
 use tracing::instrument;
 
@@ -73,7 +73,10 @@ pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E, Challenger>(
 ) -> (Vec<EF>, Vec<EF>)
 where
     E: Fn(&MultilinearPoint<EF>) -> EF,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    EF: ExtensionField<F>,
+    Challenger: FieldChallenger<F::PrimeSubfield> + GrindingChallenger<Witness = F::PrimeSubfield>,
+    F: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
+    EF: ExtensionField<<F as PrimeCharacteristicRing>::PrimeSubfield>,
 {
     let mut ood_points = EF::zero_vec(num_samples);
     let mut ood_answers = Vec::with_capacity(num_samples);

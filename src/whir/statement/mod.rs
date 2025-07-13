@@ -187,7 +187,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::{poly::coeffs::CoefficientList, whir::MultilinearPoint};
+    use crate::poly::{coeffs::CoefficientList, multilinear::MultilinearPoint};
 
     type F = BabyBear;
     type EF4 = BinomialExtensionField<F, 4>;
