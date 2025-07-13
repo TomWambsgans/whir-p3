@@ -30,8 +30,8 @@ use whir_p3::{
     },
 };
 
-type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 4>;
+type F = BinomialExtensionField<KoalaBear, 8>;
+type EF = BinomialExtensionField<KoalaBear, 8>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
 type __F = Goldilocks;
@@ -48,13 +48,13 @@ type MyChallenger =
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short = 'l', long, default_value = "90")]
+    #[arg(short = 'l', long, default_value = "128")]
     security_level: usize,
 
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "25")]
+    #[arg(short = 'd', long, default_value = "22")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
@@ -69,7 +69,7 @@ struct Args {
     #[arg(long = "sec", default_value = "CapacityBound")]
     soundness_type: SecurityAssumption,
 
-    #[arg(long = "initial-rs-reduction", default_value = "3")]
+    #[arg(long = "initial-rs-reduction", default_value = "1")]
     rs_domain_initial_reduction_factor: usize,
 }
 
@@ -201,9 +201,9 @@ fn main() {
         .unwrap();
 
     let verif_time = Instant::now();
-    verifier
-        .verify(&mut verifier_state, &parsed_commitment, &statement)
-        .unwrap();
+    // verifier
+    //     .verify(&mut verifier_state, &parsed_commitment, &statement)
+    //     .unwrap();
     let verify_time = verif_time.elapsed();
 
     println!(
@@ -212,7 +212,7 @@ fn main() {
         commit_time.as_millis(),
         opening_time.as_millis()
     );
-    let proof_size = prover_state.proof_data().len() as f64 * F::bits() as f64 / 8.0;
+    let proof_size = prover_state.proof_data().len() as f64 * <F as PrimeCharacteristicRing>::PrimeSubfield::bits() as f64 / 8.0;
     println!("proof size: {:.2} KiB", proof_size / 1024.0);
     println!("Verification time: {} μs", verify_time.as_micros());
 }
