@@ -10,7 +10,7 @@ pub mod errors;
 /// the prover sends directly the coefficients of the polynomial.
 const MAX_NUM_VARIABLES_TO_SEND_COEFFS: usize = 6;
 
-pub const DEFAULT_MAX_POW: usize = 16;
+pub const DEFAULT_MAX_POW: usize = 0;
 
 /// Represents the parameters for a multivariate polynomial.
 #[derive(Debug, Clone, Copy)]
