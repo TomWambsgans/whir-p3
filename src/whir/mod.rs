@@ -1,7 +1,7 @@
 use committer::{reader::CommitmentReader, writer::CommitmentWriter};
-use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use parameters::WhirConfig;
 use prover::Prover;
@@ -26,9 +26,9 @@ pub mod statement;
 pub mod utils;
 pub mod verifier;
 
-type F = BabyBear;
+type F = KoalaBear;
 type EF = BinomialExtensionField<F, 4>;
-type Perm = Poseidon2BabyBear<16>;
+type Perm = Poseidon2KoalaBear<16>;
 
 type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
 type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;

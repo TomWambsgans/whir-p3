@@ -18,10 +18,10 @@ use super::{
 use crate::{
     fiat_shamir::{
         errors::{ProofError, ProofResult},
-        verifier::VerifierState,
+        verifier::{ChallengerState, VerifierState},
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    whir::{Statement, parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds},
+    whir::{parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds, Statement},
 };
 
 pub mod sumcheck;
@@ -43,7 +43,7 @@ impl<'a, EF, F, H, C, Challenger> Verifier<'a, EF, F, H, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + ChallengerState,
 {
     pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
         Self(params)

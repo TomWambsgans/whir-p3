@@ -1,5 +1,6 @@
-use p3_challenger::{FieldChallenger, GrindingChallenger};
+use p3_challenger::{DuplexChallenger, FieldChallenger, GrindingChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field};
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
 use super::domain_separator::DomainSeparator;
 use crate::{
@@ -231,5 +232,15 @@ where
 
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.sample_bits(bits)
+    }
+}
+
+pub trait ChallengerState {
+    fn state(&self) -> String;
+}
+
+impl ChallengerState for DuplexChallenger<KoalaBear, Poseidon2KoalaBear<16>, 16, 8> {
+    fn state(&self) -> String {
+        format!("{:?}", self.sponge_state)
     }
 }
