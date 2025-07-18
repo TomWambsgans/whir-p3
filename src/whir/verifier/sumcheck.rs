@@ -8,8 +8,8 @@ use crate::{
         errors::{ProofError, ProofResult},
         verifier::VerifierState,
     },
-    poly::multilinear::MultilinearPoint,
-    sumcheck::{K_SKIP_SUMCHECK, sumcheck_polynomial::SumcheckPolynomial},
+    poly::{dense::WhirDensePolynomial, multilinear::MultilinearPoint},
+    sumcheck::{sumcheck_polynomial::SumcheckPolynomial, K_SKIP_SUMCHECK},
 };
 
 /// The full vector of folding randomness values, in reverse round order.
@@ -101,12 +101,12 @@ where
 
     for _ in start_round..rounds {
         // Extract the 3 evaluations of the quadratic sumcheck polynomial h(X)
-        let evals: [_; 3] = verifier_state.next_extension_scalars_const()?;
+        let coeffs: [_; 3] = verifier_state.next_extension_scalars_const()?;
 
-        let poly = SumcheckPolynomial::new(evals.to_vec(), 1);
+        let poly = WhirDensePolynomial::from_coefficients_vec(coeffs.to_vec());
 
         // Verify claimed sum is consistent with polynomial
-        if poly.sum_over_boolean_hypercube() != *claimed_sum {
+        if poly.evaluate(EF::ZERO) + poly.evaluate(EF::ONE) != *claimed_sum {
             return Err(ProofError::InvalidProof);
         }
 
@@ -114,7 +114,7 @@ where
         let rand: EF = verifier_state.sample();
 
         // Update claimed sum using folding randomness
-        *claimed_sum = poly.evaluate_at_point(&rand.into());
+        *claimed_sum = poly.evaluate(rand);
 
         // Store this round’s randomness
         randomness.push(rand);

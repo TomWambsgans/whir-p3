@@ -11,6 +11,7 @@ use crate::{
     fiat_shamir::{errors::ProofResult, prover::ProverState},
     poly::{
         coeffs::CoefficientList,
+        dense::WhirDensePolynomial,
         evals::{EvaluationStorage, EvaluationsList},
         multilinear::MultilinearPoint,
     },
@@ -411,7 +412,16 @@ where
             // Compute the quadratic sumcheck polynomial for the current variable.
             let sumcheck_poly = self.compute_sumcheck_polynomial();
 
-            prover_state.add_extension_scalars(sumcheck_poly.evaluations());
+            let sumcheck_poly_normal = WhirDensePolynomial::lagrange_interpolation(&
+                sumcheck_poly
+                    .evaluations()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (F::from_usize(i), v))
+                    .collect::<Vec<_>>(),
+            ).unwrap();
+
+            prover_state.add_extension_scalars(&sumcheck_poly_normal.coeffs);
 
             // Sample verifier challenge.
             let folding_randomness: EF = prover_state.sample();
