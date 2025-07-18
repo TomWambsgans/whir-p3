@@ -7,10 +7,7 @@ use p3_field::{PrimeField64, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use rand::{
-    Rng, SeedableRng,
-    rngs::{SmallRng, StdRng},
-};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use tracing_forest::{ForestLayer, util::LevelFilter};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::{
@@ -31,7 +28,7 @@ use whir_p3::{
 };
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<F, 4>;
+type EF = BinomialExtensionField<F, 8>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
 type __F = Goldilocks;
@@ -47,7 +44,7 @@ type MyChallenger = DuplexChallenger<F, Poseidon16, 16, 8>;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short = 'l', long, default_value = "90")]
+    #[arg(short = 'l', long, default_value = "128")]
     security_level: usize,
 
     #[arg(short = 'p', long)]
@@ -62,13 +59,16 @@ struct Args {
     #[arg(short = 'r', long, default_value = "1")]
     rate: usize,
 
-    #[arg(short = 'k', long = "fold", default_value = "4")]
-    folding_factor: usize,
+    #[arg(long = "fold-first", default_value = "7")]
+    first_folding_factor: usize,
+
+    #[arg(long = "fold-others", default_value = "4")]
+    other_folding_factors: usize,
 
     #[arg(long = "sec", default_value = "CapacityBound")]
     soundness_type: SecurityAssumption,
 
-    #[arg(long = "initial-rs-reduction", default_value = "3")]
+    #[arg(long = "initial-rs-reduction", default_value = "5")]
     rs_domain_initial_reduction_factor: usize,
 }
 
@@ -93,7 +93,10 @@ fn main() {
     let pow_bits = args.pow_bits.unwrap();
     let num_variables = args.num_variables;
     let starting_rate = args.rate;
-    let folding_factor = FoldingFactor::Constant(args.folding_factor);
+    let folding_factor = FoldingFactor::ConstantFromSecondRound(
+        args.first_folding_factor,
+        args.other_folding_factors,
+    );
     let soundness_type = args.soundness_type;
     let num_evaluations = args.num_evaluations;
 
@@ -102,9 +105,8 @@ fn main() {
     }
 
     // Create hash and compression functions for the Merkle tree
-    let mut rng = SmallRng::seed_from_u64(1);
-    let poseidon16 = Poseidon16::new_from_rng_128(&mut rng);
-    let poseidon24 = Poseidon24::new_from_rng_128(&mut rng);
+    let poseidon16 = Poseidon16::new_from_rng_128(&mut StdRng::seed_from_u64(0));
+    let poseidon24 = Poseidon24::new_from_rng_128(&mut StdRng::seed_from_u64(0));
 
     let merkle_hash = MerkleHash::new(poseidon24);
     let merkle_compress = MerkleCompress::new(poseidon16.clone());
@@ -132,6 +134,8 @@ fn main() {
     let params =
         WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(mv_params, whir_params);
 
+    println!("Using parameters:\n{}", params.to_string());
+
     let mut rng = StdRng::seed_from_u64(0);
     let polynomial = EvaluationsList::<F>::new((0..num_coeffs).map(|_| rng.random()).collect());
 
@@ -151,9 +155,9 @@ fn main() {
     }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
-    let mut domainsep = DomainSeparator::new(vec![]);
-    domainsep.commit_statement::<_, _, _, 32>(&params);
-    domainsep.add_whir_proof::<_, _, _, 32>(&params);
+    let domainsep = DomainSeparator::new(vec![]);
+    // domainsep.commit_statement::<_, _, _, 32>(&params);
+    // domainsep.add_whir_proof::<_, _, _, 32>(&params);
 
     println!("=========================================");
     println!("Whir (PCS) 🌪️");

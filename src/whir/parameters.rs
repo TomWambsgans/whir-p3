@@ -436,6 +436,65 @@ where
     }
 }
 
+impl<F> ToString for RoundConfig<F>
+where
+    F: Field,
+{
+    fn to_string(&self) -> String {
+        format!(
+            "RoundConfig:\n- Pow Bits: {}\n- Folding Pow Bits: {}\n- Num Queries: {}\n- OOD Samples: {}\n- Log Inv Rate: {}\n- Num Variables: {}\n- Folding Factor: {}\n- Domain Size: {}\n- Domain Gen: {:?}\n- Exp Domain Gen: {:?}\n",
+            self.pow_bits,
+            self.folding_pow_bits,
+            self.num_queries,
+            self.ood_samples,
+            self.log_inv_rate,
+            self.num_variables,
+            self.folding_factor,
+            self.domain_size,
+            self.domain_gen,
+            self.exp_domain_gen
+        )
+    }
+}
+
+impl<EF, F, Hash, C, Challenger> ToString for WhirConfig<EF, F, Hash, C, Challenger>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    fn to_string(&self) -> String {
+        let mut s = String::new();
+        // committment_ood_samples
+        s += &format!(
+            "\nCommittment OOD Samples: {}\n",
+            self.committment_ood_samples
+        );
+        // starting_folding_pow_bits
+        s += &format!(
+            "Starting Folding PoW Bits: {}\n",
+            self.starting_folding_pow_bits
+        );
+        // folding_factor
+        s += &format!("Folding Factor: {:?}\n", self.folding_factor);
+        s += &format!(
+            "RS Domain Initial Reduction Factor: {}\n\n",
+            self.rs_domain_initial_reduction_factor
+        );
+
+        for (i, round_param) in self.round_parameters.iter().enumerate() {
+            s.push_str(&format!("Round {}:\n", i + 1));
+            s.push_str(&format!("{}\n", round_param.to_string()));
+        }
+
+        s += &format!("Final Queries: {}\n", self.final_queries);
+
+        s += &format!("Final PoW Bits: {}\n", self.final_pow_bits);
+        s += &format!("Final Folding PoW Bits: {}\n", self.final_folding_pow_bits);
+        s += &format!("Final Log Inverse Rate: {}\n", self.final_log_inv_rate);
+        s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
