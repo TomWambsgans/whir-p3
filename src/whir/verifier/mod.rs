@@ -115,7 +115,6 @@ where
                 round_params.ood_samples,
             )?;
 
-            // dbg!(verifier_state.challenger().state());
 
             // Verify in-domain challenges on the previous commitment.
             let stir_constraints = self.verify_stir_challenges(
@@ -288,6 +287,9 @@ where
             params.num_queries,
             verifier_state,
         );
+
+        // dbg!(&stir_challenges_indexes);
+        // dbg!(verifier_state.challenger().state());
 
         let dimensions = vec![Dimensions {
             height: params.domain_size >> params.folding_factor,
