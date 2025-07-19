@@ -21,7 +21,7 @@ use crate::{
         verifier::{ChallengerState, VerifierState},
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    whir::{parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds, Statement},
+    whir::{Statement, parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds},
 };
 
 pub mod sumcheck;
@@ -114,6 +114,8 @@ where
                 round_params.num_variables,
                 round_params.ood_samples,
             )?;
+
+            // dbg!(verifier_state.challenger().state());
 
             // Verify in-domain challenges on the previous commitment.
             let stir_constraints = self.verify_stir_challenges(
@@ -282,11 +284,10 @@ where
         let leafs_base_field = round_index == 0;
 
         let stir_challenges_indexes = get_challenge_stir_queries(
-            params.domain_size,
-            params.folding_factor,
+            params.domain_size.ilog2() as usize - params.folding_factor,
             params.num_queries,
             verifier_state,
-        )?;
+        );
 
         let dimensions = vec![Dimensions {
             height: params.domain_size >> params.folding_factor,

@@ -1,11 +1,9 @@
-use itertools::Itertools;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
-use p3_util::log2_ceil_usize;
 use tracing::instrument;
 
 use crate::{
-    fiat_shamir::{ChallengSampler, errors::ProofResult, prover::ProverState},
+    fiat_shamir::{ChallengSampler, prover::ProverState},
     poly::multilinear::MultilinearPoint,
 };
 
@@ -36,29 +34,17 @@ pub const fn workload_size<T: Sized>() -> usize {
 /// ## Returns
 /// A sorted and deduplicated list of random query indices in the folded domain.
 pub fn get_challenge_stir_queries<Chal: ChallengSampler<EF>, F, EF>(
-    domain_size: usize,
-    folding_factor: usize,
+    folded_domain_size_bits: usize,
     num_queries: usize,
     prover_state: &mut Chal,
-) -> ProofResult<Vec<usize>>
+) -> Vec<usize>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    // Folded domain size = domain_size / 2^folding_factor.
-    let folded_domain_size = domain_size >> folding_factor;
-
-    // Number of bits needed to represent an index in the folded domain.
-    let domain_size_bits = log2_ceil_usize(folded_domain_size);
-
-    // Sample one integer per query, each with domain_size_bits of entropy.
-    let queries = (0..num_queries)
-        .map(|_| prover_state.sample_bits(domain_size_bits) % folded_domain_size)
-        .sorted_unstable()
-        .dedup()
-        .collect();
-
-    Ok(queries)
+    (0..num_queries)
+        .map(|_| prover_state.sample_bits(folded_domain_size_bits))
+        .collect()
 }
 
 /// A utility function to sample Out-of-Domain (OOD) points and evaluate them.

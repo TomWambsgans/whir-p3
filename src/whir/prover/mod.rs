@@ -445,15 +445,11 @@ where
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(folded_evaluations.evals());
 
+        let next_domain_log_size =
+            round_state.domain.size().ilog2() as usize - self.folding_factor.at_round(round_index);
         // Final verifier queries and answers. The indices are over the folded domain.
-        let final_challenge_indexes = get_challenge_stir_queries(
-            // The size of the original domain before folding
-            round_state.domain.size(),
-            // The folding factor we used to fold the previous polynomial
-            self.folding_factor.at_round(round_index),
-            self.final_queries,
-            prover_state,
-        )?;
+        let final_challenge_indexes =
+            get_challenge_stir_queries(next_domain_log_size, self.final_queries, prover_state);
 
         // Every query requires opening these many in the previous Merkle tree
         let mmcs = MerkleTreeMmcs::<F::Packing, F::Packing, H, C, DIGEST_ELEMS>::new(
@@ -556,12 +552,13 @@ where
         round_params: &RoundConfig<EF>,
         ood_points: Vec<EF>,
     ) -> ProofResult<(Vec<MultilinearPoint<EF>>, Vec<usize>)> {
+        let next_domain_log_size =
+            round_state.domain.size().ilog2() as usize - self.folding_factor.at_round(round_index);
         let stir_challenges_indexes = get_challenge_stir_queries(
-            round_state.domain.size(),
-            self.folding_factor.at_round(round_index),
+            next_domain_log_size,
             round_params.num_queries,
             prover_state,
-        )?;
+        );
 
         // Compute the generator of the folded domain, in the extension field
         let domain_scaled_gen = round_state
