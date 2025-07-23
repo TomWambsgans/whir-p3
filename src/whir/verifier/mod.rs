@@ -282,6 +282,8 @@ where
     {
         let leafs_base_field = round_index == 0;
 
+        verifier_state.check_pow_grinding(params.pow_bits)?;
+
         let stir_challenges_indexes = get_challenge_stir_queries(
             params.domain_size.ilog2() as usize - params.folding_factor,
             params.num_queries,
@@ -303,8 +305,6 @@ where
             leafs_base_field,
             round_index,
         )?;
-
-        verifier_state.check_pow_grinding(params.pow_bits)?;
 
         // Compute STIR Constraints
         let folds: Vec<_> = answers

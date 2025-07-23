@@ -281,6 +281,8 @@ where
             |point| info_span!("ood evaluation").in_scope(|| folded_evaluations.evaluate(point)),
         );
 
+        prover_state.pow_grinding(round_params.pow_bits);
+
         // STIR Queries
         let (stir_challenges, stir_challenges_indexes) = self.compute_stir_queries(
             round_index,
@@ -366,8 +368,6 @@ where
             }
         };
 
-        prover_state.pow_grinding(round_params.pow_bits);
-
         // Randomness for combination
         let combination_randomness_gen: EF = prover_state.sample();
         let combination_randomness: Vec<_> = combination_randomness_gen
@@ -447,6 +447,8 @@ where
 
         let next_domain_log_size =
             round_state.domain.size().ilog2() as usize - self.folding_factor.at_round(round_index);
+        prover_state.pow_grinding(self.final_pow_bits);
+
         // Final verifier queries and answers. The indices are over the folded domain.
         let final_challenge_indexes =
             get_challenge_stir_queries(next_domain_log_size, self.final_queries, prover_state);
@@ -505,8 +507,6 @@ where
                 }
             }
         }
-
-        prover_state.pow_grinding(self.final_pow_bits);
 
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
