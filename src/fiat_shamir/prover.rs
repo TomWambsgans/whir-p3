@@ -150,6 +150,9 @@ where
 
         // Append the witness to the proof data.
         self.proof_data.push(witness);
+        for _ in 0..EF::DIMENSION - 1 {
+            self.proof_data.push(F::ZERO);
+        }
     }
 }
 

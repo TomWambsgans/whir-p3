@@ -203,13 +203,13 @@ where
         }
 
         // Ensure there is at least one witness element to consume.
-        if self.index >= self.proof_data.len() {
+        if self.index > self.proof_data.len() + EF::DIMENSION {
             return Err(ProofError::ExceededTranscript);
         }
 
         // Consume the next witness element.
         let witness = self.proof_data[self.index];
-        self.index += 1;
+        self.index += EF::DIMENSION;
 
         // Verify the witness using the challenger.
         if self.challenger.check_witness(bits, witness) {
