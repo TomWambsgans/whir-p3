@@ -8,8 +8,6 @@ use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
-use tracing_forest::{ForestLayer, util::LevelFilter};
-use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::{
     dft::EvalsDft,
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
@@ -74,14 +72,14 @@ struct Args {
 }
 
 fn main() {
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
+    // let env_filter = EnvFilter::builder()
+    //     .with_default_directive(LevelFilter::INFO.into())
+    //     .from_env_lossy();
 
-    Registry::default()
-        .with(env_filter)
-        .with(ForestLayer::default())
-        .init();
+    // Registry::default()
+    //     .with(env_filter)
+    //     .with(ForestLayer::default())
+    //     .init();
 
     let mut args = Args::parse();
 
@@ -135,7 +133,7 @@ fn main() {
     let params =
         WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(mv_params, whir_params);
 
-    println!("Using parameters:\n{}", params.to_string());
+    // println!("Using parameters:\n{}", params.to_string());
 
     let mut rng = StdRng::seed_from_u64(0);
     let polynomial = EvaluationsList::<F>::new((0..num_coeffs).map(|_| rng.random()).collect());

@@ -8,12 +8,13 @@ use tracing::instrument;
 
 use super::sumcheck_polynomial::SumcheckPolynomial;
 use crate::{
+    PF,
     fiat_shamir::prover::ProverState,
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    poly::{dense::WhirDensePolynomial, evals::EvaluationsList, multilinear::MultilinearPoint},
     sumcheck::{
         sumcheck_single_skip::compute_skipping_sumcheck_polynomial, utils::sumcheck_quadratic,
     },
-    whir::statement::Statement, PF,
+    whir::statement::Statement,
 };
 
 #[cfg(feature = "parallel")]
@@ -166,7 +167,17 @@ where
 {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
-    prover_state.add_extension_scalars(sumcheck_poly.evaluations());
+
+    let sumcheck_poly_normal = WhirDensePolynomial::lagrange_interpolation(
+        &sumcheck_poly
+            .evaluations()
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (F::from_usize(i), v))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    prover_state.add_extension_scalars(&sumcheck_poly_normal.coeffs);
 
     // Sample verifier challenge.
     let r: EF = prover_state.sample();
@@ -216,7 +227,16 @@ where
 {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
-    prover_state.add_extension_scalars(sumcheck_poly.evaluations());
+    let sumcheck_poly_normal = WhirDensePolynomial::lagrange_interpolation(
+        &sumcheck_poly
+            .evaluations()
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (F::from_usize(i), v))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    prover_state.add_extension_scalars(&sumcheck_poly_normal.coeffs);
 
     // Sample verifier challenge.
     let r: EF = prover_state.sample();

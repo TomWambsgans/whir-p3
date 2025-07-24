@@ -50,6 +50,10 @@ where
         }
     }
 
+    pub fn challenger(&self) -> &Challenger {
+        &self.challenger
+    }
+
     /// Access all proof data accumulated so far.
     ///
     /// This data will be sent to the verifier as part of the proof.

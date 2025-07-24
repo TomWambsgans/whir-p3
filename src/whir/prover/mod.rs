@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use super::{committer::Witness, parameters::WhirConfig, statement::Statement};
+use crate::fiat_shamir::verifier::ChallengerState;
 use crate::utils::flatten_scalars_to_base;
 use crate::{
     PF, PFPacking,
@@ -57,7 +58,7 @@ where
     EF: ExtensionField<F> + TwoAdicField,
     F: ExtensionField<PF<F>>,
     EF: ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     /// Validates that the total number of variables expected by the prover configuration
     /// matches the number implied by the folding schedule and the final rounds.
@@ -201,6 +202,7 @@ where
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<F>: TwoAdicField,
     {
+
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables =
             self.mv_parameters.num_variables - self.folding_factor.total_number(round_index);

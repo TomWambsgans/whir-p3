@@ -4,13 +4,14 @@ use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
-    fiat_shamir::{errors::ProofResult, prover::ProverState},
+    PF,
+    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
     poly::multilinear::MultilinearPoint,
-    sumcheck::{sumcheck_single::SumcheckSingle, K_SKIP_SUMCHECK},
+    sumcheck::{K_SKIP_SUMCHECK, sumcheck_single::SumcheckSingle},
     whir::{
         committer::{RoundMerkleTree, Witness},
-        statement::{weights::Weights, Statement},
-    }, PF,
+        statement::{Statement, weights::Weights},
+    },
 };
 
 /// Holds all per-round prover state required during the execution of the WHIR protocol.
@@ -94,7 +95,7 @@ where
         witness: Witness<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<Self>
     where
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
     {
         // Convert witness ood_points into constraints
         let new_constraints = witness

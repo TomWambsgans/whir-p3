@@ -11,9 +11,9 @@ use tracing::{info_span, instrument};
 
 use super::Witness;
 use crate::{
-     PF, PFPacking,
+    PF, PFPacking,
     dft::EvalsDft,
-    fiat_shamir::{errors::ProofResult, prover::ProverState},
+    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
     poly::evals::EvaluationsList,
     utils::parallel_repeat,
     whir::{parameters::WhirConfig, utils::sample_ood_points},
@@ -40,7 +40,7 @@ where
     EF: ExtensionField<F> + ExtensionField<PF<F>>,
     PF<F>: TwoAdicField,
     F: ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     /// Create a new writer that borrows the WHIR protocol configuration.
     pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
@@ -65,11 +65,11 @@ where
     ) -> ProofResult<Witness<EF, F, DIGEST_ELEMS>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
-    + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
-    + Sync,
+            + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
+            + Sync,
         C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
-    + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
-    + Sync,
+            + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
+            + Sync,
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let evals_repeated = info_span!("repeating evals")
