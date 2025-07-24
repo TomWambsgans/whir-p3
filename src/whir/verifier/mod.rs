@@ -57,7 +57,7 @@ where
         verifier_state: &mut VerifierState<F, EF, Challenger>,
         parsed_commitment: &ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>,
         statement: &Statement<EF>,
-    ) -> ProofResult<(MultilinearPoint<EF>, Vec<EF>)>
+    ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
         C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
@@ -189,14 +189,8 @@ where
                 .collect(),
         );
 
-        // Compute evaluation of weights in folding randomness
-        // Some weight computations can be deferred and will be returned for the caller
-        // to verify.
-        let deferred =
-            verifier_state.next_extension_scalars_vec(statement.num_deref_constraints())?;
-
         let evaluation_of_weights =
-            self.eval_constraints_poly(&round_constraints, &deferred, folding_randomness.clone());
+            self.eval_constraints_poly(&round_constraints, folding_randomness.clone());
 
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
@@ -204,7 +198,7 @@ where
             return Err(ProofError::InvalidProof);
         }
 
-        Ok((folding_randomness, deferred))
+        Ok(folding_randomness)
     }
 
     /// Combine multiple constraints into a single claim using random linear combination.
@@ -319,7 +313,6 @@ where
             .map(|(point, &value)| Constraint {
                 weights: Weights::univariate(point, params.num_variables),
                 sum: value,
-                defer_evaluation: false,
             })
             .collect();
 
@@ -484,11 +477,9 @@ where
     fn eval_constraints_poly(
         &self,
         constraints: &[(Vec<EF>, Vec<Constraint<EF>>)],
-        deferred: &[EF],
         mut point: MultilinearPoint<EF>,
     ) -> EF {
         let mut num_variables = self.mv_parameters.num_variables;
-        let mut deferred = deferred.iter().copied();
         let mut value = EF::ZERO;
 
         for (round, (randomness, constraints)) in constraints.iter().enumerate() {
@@ -501,11 +492,7 @@ where
                 .iter()
                 .zip(randomness)
                 .map(|(constraint, &randomness)| {
-                    let value = if constraint.defer_evaluation {
-                        deferred.next().unwrap()
-                    } else {
-                        constraint.weights.compute(&point)
-                    };
+                    let value = constraint.weights.compute(&point);
                     value * randomness
                 })
                 .sum::<EF>();

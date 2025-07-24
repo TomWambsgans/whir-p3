@@ -111,7 +111,6 @@ where
             .map(|(&point, &eval)| Constraint {
                 weights: Weights::univariate(point, self.num_variables),
                 sum: eval,
-                defer_evaluation: false,
             })
             .collect()
     }

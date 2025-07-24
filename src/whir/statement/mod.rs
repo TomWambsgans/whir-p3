@@ -72,7 +72,6 @@ impl<F: Field> Statement<F> {
         self.constraints.push(Constraint {
             weights,
             sum,
-            defer_evaluation: false,
         });
     }
 
@@ -84,7 +83,6 @@ impl<F: Field> Statement<F> {
             Constraint {
                 weights,
                 sum,
-                defer_evaluation: false,
             },
         );
     }
@@ -108,7 +106,6 @@ impl<F: Field> Statement<F> {
             new_constraints.push(Constraint {
                 weights,
                 sum,
-                defer_evaluation: false,
             });
         }
 
@@ -169,13 +166,5 @@ impl<F: Field> Statement<F> {
         );
 
         (combined_evals, combined_sum)
-    }
-
-    #[must_use]
-    pub fn num_deref_constraints(&self) -> usize {
-        self.constraints
-            .iter()
-            .filter(|constraint| constraint.defer_evaluation)
-            .count()
     }
 }

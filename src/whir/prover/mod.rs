@@ -144,7 +144,7 @@ where
         prover_state: &mut ProverState<F, EF, Challenger>,
         statement: Statement<EF>,
         witness: Witness<EF, F, DIGEST_ELEMS>,
-    ) -> ProofResult<(MultilinearPoint<EF>, Vec<EF>)>
+    ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
             + CryptographicHasher<F::Packing, [F::Packing; DIGEST_ELEMS]>
@@ -178,18 +178,7 @@ where
         round_state.randomness_vec.reverse();
         let constraint_eval = MultilinearPoint(round_state.randomness_vec);
 
-        // Hints for deferred constraints
-        let deferred = round_state
-            .statement
-            .constraints
-            .iter()
-            .filter(|constraint| constraint.defer_evaluation)
-            .map(|constraint| constraint.weights.compute(&constraint_eval))
-            .collect::<Vec<_>>();
-
-        prover_state.hint_extension_scalars(&deferred);
-
-        Ok((constraint_eval, deferred))
+        Ok(constraint_eval)
     }
 
     #[instrument(skip_all, fields(round_number = round_index, log_size = self.mv_parameters.num_variables - self.folding_factor.total_number(round_index)))]

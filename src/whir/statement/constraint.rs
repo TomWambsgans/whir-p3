@@ -15,12 +15,6 @@ pub struct Constraint<F> {
     ///
     /// This is the scalar value that the weighted sum must match.
     pub sum: F,
-
-    /// If true, the verifier will not evaluate the weight directly.
-    ///
-    /// Instead, the prover must supply the result as a hint.
-    /// This is used for deferred or externally computed evaluations.
-    pub defer_evaluation: bool,
 }
 
 impl<F: Field> Constraint<F> {
