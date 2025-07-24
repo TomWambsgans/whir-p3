@@ -12,19 +12,15 @@ use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use super::{committer::Witness, parameters::WhirConfig, statement::Statement};
+use crate::utils::flatten_scalars_to_base;
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
     fiat_shamir::{errors::ProofResult, prover::ProverState},
-    poly::{
-        evals::{EvaluationStorage, EvaluationsList},
-        multilinear::MultilinearPoint,
-    },
-    sumcheck::sumcheck_single::SumcheckSingle,
-    utils::{flatten_scalars_to_base, parallel_repeat},
+    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    utils::parallel_repeat,
     whir::{
         parameters::RoundConfig,
-        statement::weights::Weights,
         utils::{get_challenge_stir_queries, sample_ood_points},
     },
 };
@@ -205,31 +201,14 @@ where
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<F>: TwoAdicField,
     {
-        // - If a sumcheck already exists, use its evaluations
-        // - Otherwise, fold the evaluations from the previous round
-        let folded_evaluations = if let Some(sumcheck) = &round_state.sumcheck_prover {
-            match &sumcheck.evaluation_of_p {
-                EvaluationStorage::Base(_) => {
-                    panic!("After a first round, the evaluations must be in the extension field")
-                }
-                EvaluationStorage::Extension(f) => f.parallel_clone(),
-            }
-        } else {
-            round_state
-                .initial_evaluations
-                .as_ref()
-                .unwrap()
-                .fold(&round_state.folding_randomness)
-        };
-
+        let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables =
             self.mv_parameters.num_variables - self.folding_factor.total_number(round_index);
-        // The number of variables at the given round should match the folded number of variables.
         assert_eq!(num_variables, folded_evaluations.num_variables());
 
         // Base case: final round reached
         if round_index == self.n_rounds() {
-            return self.final_round(round_index, prover_state, round_state, &folded_evaluations);
+            return self.final_round(round_index, prover_state, round_state);
         }
 
         let round_params = &self.round_parameters[round_index];
@@ -239,8 +218,8 @@ where
 
         // Compute polynomial evaluations and build Merkle tree
         let domain_reduction = 1 << self.rs_reduction_factor(round_index);
-        let new_domain = round_state.domain.scale(domain_reduction);
-        let inv_rate = new_domain.size() / folded_evaluations.num_evals();
+        let new_domain_size = round_state.domain_size / domain_reduction;
+        let inv_rate = new_domain_size / folded_evaluations.num_evals();
         let folded_matrix = info_span!("fold matrix").in_scope(|| {
             let evals_repeated = info_span!("repeating evals")
                 .in_scope(|| parallel_repeat(folded_evaluations.evals(), inv_rate));
@@ -278,17 +257,31 @@ where
             |point| info_span!("ood evaluation").in_scope(|| folded_evaluations.evaluate(point)),
         );
 
+        // CRITICAL: Perform proof-of-work grinding to finalize the transcript before querying.
+        //
+        // This is a crucial security step to prevent a malicious prover from influencing the
+        // verifier's challenges.
+        //
+        // The verifier's query locations (the `stir_challenges`) are generated based on the
+        // current transcript state, which includes the prover's polynomial commitment (the Merkle
+        // root) for this round. Without grinding, a prover could repeatedly try different
+        // commitments until they find one that results in "easy" queries, breaking soundness.
+        //
+        // By forcing the prover to perform this expensive proof-of-work *after* committing but
+        // *before* receiving the queries, we make it computationally infeasible to "shop" for
+        // favorable challenges. The grinding effectively "locks in" the prover's commitment.
         prover_state.pow_grinding(round_params.pow_bits);
 
         // STIR Queries
-        let (stir_challenges, stir_challenges_indexes) = self.compute_stir_queries(
-            round_index,
-            prover_state,
-            round_state,
-            num_variables,
-            round_params,
-            ood_points,
-        )?;
+        let (ood_challenges, stir_challenges, stir_challenges_indexes) = self
+            .compute_stir_queries(
+                prover_state,
+                round_state,
+                num_variables,
+                round_params,
+                &ood_points,
+                round_index
+            )?;
 
         // Collect Merkle proofs for stir queries
         let stir_evaluations = match &round_state.merkle_prover_data {
@@ -315,10 +308,7 @@ where
                 }
 
                 // Evaluate answers in the folding randomness.
-                let mut stir_evaluations = ood_answers;
-                // Exactly one growth
-                stir_evaluations.reserve_exact(answers.len());
-
+                let mut stir_evaluations = Vec::with_capacity(answers.len());
                 for answer in &answers {
                     stir_evaluations.push(
                         EvaluationsList::new(answer.clone())
@@ -350,10 +340,7 @@ where
                 }
 
                 // Evaluate answers in the folding randomness.
-                let mut stir_evaluations = ood_answers;
-                // Exactly one growth
-                stir_evaluations.reserve_exact(answers.len());
-
+                let mut stir_evaluations = Vec::with_capacity(answers.len());
                 for answer in &answers {
                     stir_evaluations.push(
                         EvaluationsList::new(answer.clone())
@@ -367,55 +354,51 @@ where
 
         // Randomness for combination
         let combination_randomness_gen: EF = prover_state.sample();
-        let combination_randomness: Vec<_> = combination_randomness_gen
+        let ood_combination_randomness: Vec<_> = combination_randomness_gen
             .powers()
+            .collect_n(ood_challenges.len());
+        round_state.sumcheck_prover.add_new_equality(
+            &ood_challenges,
+            &ood_answers,
+            &ood_combination_randomness,
+        );
+        let stir_combination_randomness = combination_randomness_gen
+            .powers()
+            .skip(ood_challenges.len())
             .take(stir_challenges.len())
-            .collect();
+            .collect::<Vec<_>>();
 
-        let mut sumcheck_prover =
-            if let Some(mut sumcheck_prover) = round_state.sumcheck_prover.take() {
-                sumcheck_prover.add_new_equality(
-                    &stir_challenges,
-                    &stir_evaluations,
-                    &combination_randomness,
-                );
-                sumcheck_prover
-            } else {
-                let mut statement = Statement::new(folded_evaluations.num_variables());
+        // TODO here we could gain performance by removing the embedding from F to EF
+        round_state.sumcheck_prover.add_new_equality(
+            &stir_challenges
+                .iter()
+                .map(MultilinearPoint::embed)
+                .collect::<Vec<_>>(),
+            &stir_evaluations,
+            &stir_combination_randomness,
+        );
 
-                for (point, eval) in stir_challenges.into_iter().zip(stir_evaluations) {
-                    let weights = Weights::evaluation(point);
-                    statement.add_constraint(weights, eval);
-                }
-
-                SumcheckSingle::from_extension_evals(
-                    folded_evaluations.parallel_clone(),
-                    &statement,
-                    combination_randomness[1],
-                )
-            };
-
-        let folding_randomness = sumcheck_prover.compute_sumcheck_polynomials(
+        let folding_randomness = round_state.sumcheck_prover.compute_sumcheck_polynomials(
             prover_state,
             folding_factor_next,
             round_params.folding_pow_bits,
-            None,
-        )?;
+        );
 
         let start_idx = self.folding_factor.total_number(round_index);
         let dst_randomness =
-            &mut round_state.randomness_vec[start_idx..][..folding_randomness.0.len()];
+            &mut round_state.randomness_vec[start_idx..][..folding_randomness.len()];
 
         for (dst, src) in dst_randomness
             .iter_mut()
-            .zip(folding_randomness.0.iter().rev())
+            .zip(folding_randomness.iter().rev())
         {
             *dst = *src;
         }
 
         // Update round state
-        round_state.domain = new_domain;
-        round_state.sumcheck_prover = Some(sumcheck_prover);
+        round_state.domain_size = new_domain_size;
+        round_state.next_domain_gen =
+            F::two_adic_generator(new_domain_size.ilog2() as usize - folding_factor_next);
         round_state.folding_randomness = folding_randomness;
         round_state.merkle_prover_data = Some(prover_data);
 
@@ -427,8 +410,7 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
-        folded_evaluations: &EvaluationsList<EF>,
+        round_state: &mut RoundState<EF, F,  DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -440,15 +422,31 @@ where
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Directly send coefficients of the polynomial to the verifier.
-        prover_state.add_extension_scalars(folded_evaluations.evals());
+        prover_state.add_extension_scalars(&round_state.sumcheck_prover.evals);
 
-        let next_domain_log_size =
-            round_state.domain.size().ilog2() as usize - self.folding_factor.at_round(round_index);
+        // CRITICAL: Perform proof-of-work grinding to finalize the transcript before querying.
+        //
+        // This is a crucial security step to prevent a malicious prover from influencing the
+        // verifier's challenges.
+        //
+        // The verifier's query locations (the `stir_challenges`) are generated based on the
+        // current transcript state, which includes the prover's polynomial commitment (the Merkle
+        // root) for this round. Without grinding, a prover could repeatedly try different
+        // commitments until they find one that results in "easy" queries, breaking soundness.
+        //
+        // By forcing the prover to perform this expensive proof-of-work *after* committing but
+        // *before* receiving the queries, we make it computationally infeasible to "shop" for
+        // favorable challenges. The grinding effectively "locks in" the prover's commitment.
         prover_state.pow_grinding(self.final_pow_bits);
 
+
         // Final verifier queries and answers. The indices are over the folded domain.
-        let final_challenge_indexes =
-            get_challenge_stir_queries(next_domain_log_size, self.final_queries, prover_state);
+        let final_challenge_indexes = get_challenge_stir_queries(
+            // The size of the original domain before folding
+            round_state.domain_size >> self.folding_factor.at_round(round_index),
+            self.final_queries,
+            prover_state,
+        );
 
         // Every query requires opening these many in the previous Merkle tree
         let mmcs = MerkleTreeMmcs::<PFPacking<F>, PFPacking<F>, H, C, DIGEST_ELEMS>::new(
@@ -507,30 +505,19 @@ where
 
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
-            let final_folding_randomness = round_state
-                .sumcheck_prover
-                .clone()
-                .unwrap_or_else(|| {
-                    SumcheckSingle::from_extension_evals(
-                        folded_evaluations.parallel_clone(),
-                        &round_state.statement,
-                        EF::ONE,
-                    )
-                })
-                .compute_sumcheck_polynomials(
+            let final_folding_randomness =
+                round_state.sumcheck_prover.compute_sumcheck_polynomials(
                     prover_state,
                     self.final_sumcheck_rounds,
                     self.final_folding_pow_bits,
-                    None,
-                )?;
-
+                );
             let start_idx = self.folding_factor.total_number(round_index);
             let rand_dst = &mut round_state.randomness_vec
-                [start_idx..start_idx + final_folding_randomness.0.len()];
+                [start_idx..start_idx + final_folding_randomness.len()];
 
             for (dst, src) in rand_dst
                 .iter_mut()
-                .zip(final_folding_randomness.0.iter().rev())
+                .zip(final_folding_randomness.iter().rev())
             {
                 *dst = *src;
             }
@@ -540,38 +527,42 @@ where
     }
 
     #[instrument(skip_all, level = "debug")]
+    #[allow(clippy::type_complexity)]
     fn compute_stir_queries<const DIGEST_ELEMS: usize>(
         &self,
-        round_index: usize,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         round_state: &RoundState<EF, F, DIGEST_ELEMS>,
         num_variables: usize,
-        round_params: &RoundConfig<EF>,
-        ood_points: Vec<EF>,
-    ) -> ProofResult<(Vec<MultilinearPoint<EF>>, Vec<usize>)> {
-        let next_domain_log_size =
-            round_state.domain.size().ilog2() as usize - self.folding_factor.at_round(round_index);
-        let stir_challenges_indexes = get_challenge_stir_queries::<PF<F>, _>(
-            next_domain_log_size,
+        round_params: &RoundConfig<F>,
+        ood_points: &[EF],
+        round_index: usize,
+    ) -> ProofResult<(
+        Vec<MultilinearPoint<EF>>,
+        Vec<MultilinearPoint<F>>,
+        Vec<usize>,
+    )> {
+        let stir_challenges_indexes = get_challenge_stir_queries(
+            round_state.domain_size >> self.folding_factor.at_round(round_index),
             round_params.num_queries,
             prover_state,
         );
 
         // Compute the generator of the folded domain, in the extension field
-        let domain_scaled_gen = round_state
-            .domain
-            .backing_domain
-            .element(1 << self.folding_factor.at_round(round_index));
-        let stir_challenges = ood_points
-            .into_iter()
-            .chain(
-                stir_challenges_indexes
-                    .iter()
-                    .map(|i| domain_scaled_gen.exp_u64(*i as u64)),
-            )
-            .map(|univariate| MultilinearPoint::expand_from_univariate(univariate, num_variables))
+        let domain_scaled_gen = round_state.next_domain_gen;
+        let ood_challenges = ood_points
+            .iter()
+            .map(|univariate| MultilinearPoint::expand_from_univariate(*univariate, num_variables))
+            .collect();
+        let stir_challenges = stir_challenges_indexes
+            .iter()
+            .map(|i| {
+                MultilinearPoint::expand_from_univariate(
+                    domain_scaled_gen.exp_u64(*i as u64),
+                    num_variables,
+                )
+            })
             .collect();
 
-        Ok((stir_challenges, stir_challenges_indexes))
+        Ok((ood_challenges, stir_challenges, stir_challenges_indexes))
     }
 }

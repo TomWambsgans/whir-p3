@@ -1,7 +1,6 @@
 use p3_field::{Field, PrimeCharacteristicRing};
 
 pub mod dft;
-pub mod domain;
 pub mod fiat_shamir;
 pub mod parameters;
 pub mod poly;

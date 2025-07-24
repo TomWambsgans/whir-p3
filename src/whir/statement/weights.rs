@@ -140,7 +140,7 @@ impl<F: Field> Weights<F> {
         assert_eq!(accumulator.num_variables(), self.num_variables());
         match self {
             Self::Evaluation { point } => {
-                eval_eq::<Base, F, INITIALIZED>(&point.0, accumulator.evals_mut(), factor);
+                eval_eq::<Base, F, INITIALIZED>(point, accumulator.evals_mut(), factor);
             }
             Self::Linear { weight } => {
                 #[cfg(feature = "parallel")]
@@ -182,24 +182,6 @@ impl<F: Field> Weights<F> {
         match self {
             Self::Evaluation { point } => point.eq_poly_outside(folding_randomness),
             Self::Linear { weight } => weight.evaluate(folding_randomness),
-        }
-    }
-
-    /// Evaluate the weighted sum with a polynomial in coefficient form.
-    #[must_use]
-    pub fn evaluate_coeffs(&self, poly: &EvaluationsList<F>) -> F {
-        assert_eq!(self.num_variables(), poly.num_variables());
-        match self {
-            Self::Evaluation { point } => poly.evaluate(point),
-
-            // We intentionally avoid parallel iterators here because this function is only called by the verifier,
-            // which is assumed to run on a lightweight device.
-            Self::Linear { weight } => weight
-                .evals()
-                .iter()
-                .zip(poly.evals())
-                .map(|(&w, &p)| w * p)
-                .sum(),
         }
     }
 }
@@ -321,7 +303,7 @@ mod tests {
 
         // Compute expected result manually
         let mut expected = vec![F::ZERO, F::ZERO];
-        eval_eq::<_, _, true>(&point.0, &mut expected, factor);
+        eval_eq::<_, _, true>(&point, &mut expected, factor);
 
         assert_eq!(accumulator.evals(), &expected);
     }

@@ -3,7 +3,7 @@ use p3_field::Field;
 use crate::{poly::evals::EvaluationsList, whir::statement::weights::Weights};
 
 /// Represents a single constraint in a polynomial statement.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Constraint<F> {
     /// The weight function applied to the polynomial.
     ///
@@ -21,6 +21,6 @@ impl<F: Field> Constraint<F> {
     /// Verify if a polynomial (in coefficient form) satisfies the constraint.
     #[must_use]
     pub fn verify(&self, poly: &EvaluationsList<F>) -> bool {
-        self.weights.evaluate_coeffs(poly) == self.sum
+        self.weights.evaluate_evals(poly) == self.sum
     }
 }

@@ -96,7 +96,7 @@ where
                 &mut claimed_sum,
                 self.folding_factor.at_round(0),
                 self.starting_folding_pow_bits,
-                false,
+                self.univariate_skip,
             )?;
             round_folding_randomness.push(folding_randomness);
         } else {
@@ -104,11 +104,13 @@ where
             assert!(statement.constraints.is_empty());
             round_constraints.push((vec![], vec![]));
 
-            let mut folding_randomness = EF::zero_vec(self.folding_factor.at_round(0));
-            for folded_randomness in &mut folding_randomness {
-                *folded_randomness = verifier_state.sample();
-            }
-            round_folding_randomness.push(MultilinearPoint(folding_randomness));
+            let folding_randomness = MultilinearPoint(
+                (0..self.folding_factor.at_round(0))
+                    .map(|_| verifier_state.sample())
+                    .collect::<Vec<_>>(),
+            );
+
+            round_folding_randomness.push(folding_randomness);
 
             verifier_state.check_pow_grinding(self.starting_folding_pow_bits)?;
         }
@@ -159,7 +161,7 @@ where
         }
 
         // In the final round we receive the full polynomial instead of a commitment.
-        let n_final_coeffs = 1 << self.0.n_vars_of_final_polynomial();
+        let n_final_coeffs = 1 << self.n_vars_of_final_polynomial();
         let final_coefficients = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
         let final_evaluations = EvaluationsList::new(final_coefficients);
 
@@ -272,7 +274,7 @@ where
     pub fn verify_stir_challenges<const DIGEST_ELEMS: usize>(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
-        params: &RoundConfig<EF>,
+        params: &RoundConfig<F>,
         commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
@@ -288,10 +290,24 @@ where
     {
         let leafs_base_field = round_index == 0;
 
+        // CRITICAL: Verify the prover's proof-of-work before generating challenges.
+        //
+        // This is the verifier's counterpart to the prover's grinding step and is essential
+        // for protocol soundness.
+        //
+        // The query locations (`stir_challenges_indexes`) we are about to generate are derived
+        // from the transcript, which includes the prover's commitment for this round. To prevent
+        // a malicious prover from repeatedly trying different commitments until they find one that
+        // produces "easy" queries, the protocol forces the prover to perform an expensive
+        // proof-of-work (grinding) after they commit.
+        //
+        // By verifying that proof-of-work *now*, we confirm that the prover "locked in" their
+        // commitment at a significant computational cost. This gives us confidence that the
+        // challenges we generate are unpredictable and unbiased by a cheating prover.
         verifier_state.check_pow_grinding(params.pow_bits)?;
 
-        let stir_challenges_indexes = get_challenge_stir_queries::<PF<F>, _>(
-            params.domain_size.ilog2() as usize - params.folding_factor,
+        let stir_challenges_indexes = get_challenge_stir_queries(
+            params.domain_size >> params.folding_factor,
             params.num_queries,
             verifier_state,
         );
@@ -320,10 +336,10 @@ where
 
         let stir_constraints = stir_challenges_indexes
             .iter()
-            .map(|&index| params.exp_domain_gen.exp_u64(index as u64))
+            .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
             .zip(&folds)
             .map(|(point, &value)| Constraint {
-                weights: Weights::univariate(point, params.num_variables),
+                weights: Weights::univariate(EF::from(point), params.num_variables),
                 sum: value,
             })
             .collect();
@@ -508,7 +524,7 @@ where
             assert_eq!(randomness.len(), constraints.len());
             if round > 0 {
                 num_variables -= self.folding_factor.at_round(round - 1);
-                point = MultilinearPoint(point.0[..num_variables].to_vec());
+                point = MultilinearPoint(point[..num_variables].to_vec());
             }
             value += constraints
                 .iter()

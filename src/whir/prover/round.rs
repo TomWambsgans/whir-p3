@@ -4,15 +4,13 @@ use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
-    PF,
-    domain::Domain,
     fiat_shamir::{errors::ProofResult, prover::ProverState},
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::{K_SKIP_SUMCHECK, sumcheck_single::SumcheckSingle},
+    poly::multilinear::MultilinearPoint,
+    sumcheck::{sumcheck_single::SumcheckSingle, K_SKIP_SUMCHECK},
     whir::{
         committer::{RoundMerkleTree, Witness},
-        statement::{Statement, weights::Weights},
-    },
+        statement::{weights::Weights, Statement},
+    }, PF,
 };
 
 /// Holds all per-round prover state required during the execution of the WHIR protocol.
@@ -31,21 +29,17 @@ where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
 {
-    /// The domain used in this round, including the size and generator.
-    /// This is typically a scaled version of the previous round’s domain.
-    pub(crate) domain: Domain<EF>,
+    pub(crate) domain_size: usize,
+
+    pub(crate) next_domain_gen: F,
 
     /// The sumcheck prover responsible for managing constraint accumulation and sumcheck rounds.
     /// Initialized in the first round (if applicable), and reused/updated in each subsequent round.
-    pub(crate) sumcheck_prover: Option<SumcheckSingle<F, EF>>,
+    pub(crate) sumcheck_prover: SumcheckSingle<F, EF>,
 
     /// The sampled folding randomness for this round, used to collapse a subset of variables.
     /// Length equals the folding factor at this round.
     pub(crate) folding_randomness: MultilinearPoint<EF>,
-
-    /// The multilinear polynomial evaluations at the start of this round.
-    /// These are updated by folding the previous round’s coefficients using `folding_randomness`.
-    pub(crate) initial_evaluations: Option<EvaluationsList<F>>,
 
     /// Merkle commitment prover data for the **base field** polynomial from the first round.
     /// This is used to open values at queried locations.
@@ -118,60 +112,71 @@ where
 
         statement.add_constraints_in_front(new_constraints);
 
-        let mut sumcheck_prover = None;
-        let folding_randomness = if prover.initial_statement {
+        let (sumcheck_prover, folding_randomness) = if prover.initial_statement {
             // If there is initial statement, then we run the sum-check for
             // this initial statement.
             let combination_randomness_gen: EF = prover_state.sample();
 
             // Create the sumcheck prover
-            let mut sumcheck = SumcheckSingle::from_base_evals(
-                witness.polynomial.parallel_clone(), // TODO I think we could avoid cloning here
-                &statement,
-                combination_randomness_gen,
-            );
+            let (sumcheck, folding_randomness) = if prover.univariate_skip {
+                SumcheckSingle::with_skip(
+                    &witness.polynomial,
+                    &statement,
+                    combination_randomness_gen,
+                    prover_state,
+                    prover.folding_factor.at_round(0),
+                    prover.starting_folding_pow_bits,
+                    K_SKIP_SUMCHECK,
+                )
+            } else {
+                SumcheckSingle::from_base_evals(
+                    &witness.polynomial,
+                    &statement,
+                    combination_randomness_gen,
+                    prover_state,
+                    prover.folding_factor.at_round(0),
+                    prover.starting_folding_pow_bits,
+                )
+            };
 
-            // Compute sumcheck polynomials and return the folding randomness values
-            let folding_randomness = sumcheck.compute_sumcheck_polynomials(
-                prover_state,
-                prover.folding_factor.at_round(0),
-                prover.starting_folding_pow_bits,
-                if prover.univariate_skip {
-                    Some(K_SKIP_SUMCHECK)
-                } else {
-                    None
-                },
-            )?;
-
-            sumcheck_prover = Some(sumcheck);
-            folding_randomness
+            (sumcheck, folding_randomness)
         } else {
             // If there is no initial statement, there is no need to run the
             // initial rounds of the sum-check, and the verifier directly sends
             // the initial folding randomnesses.
-            let mut folding_randomness = EF::zero_vec(prover.folding_factor.at_round(0));
-            for folded_randomness in &mut folding_randomness {
-                *folded_randomness = prover_state.sample();
-            }
+
+            let folding_randomness = MultilinearPoint(
+                (0..prover.folding_factor.at_round(0))
+                    .map(|_| prover_state.sample())
+                    .collect::<Vec<_>>(),
+            );
+
+            let poly = witness.polynomial.fold(&folding_randomness);
+            let num_variables = poly.num_variables();
+
+            // Create the sumcheck prover w/o running any rounds.
+            let sumcheck =
+                SumcheckSingle::from_extension_evals(poly, &Statement::new(num_variables), EF::ONE);
 
             prover_state.pow_grinding(prover.starting_folding_pow_bits);
-            MultilinearPoint(folding_randomness)
+
+            (sumcheck, folding_randomness)
         };
+
         let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
             let mut randomness_vec = Vec::with_capacity(prover.mv_parameters.num_variables);
-            randomness_vec.extend(folding_randomness.0.iter().rev().copied());
+            randomness_vec.extend(folding_randomness.iter().rev().copied());
             randomness_vec.resize(prover.mv_parameters.num_variables, EF::ZERO);
             randomness_vec
         });
 
-        let initial_evaluations = sumcheck_prover
-            .as_ref()
-            .map_or(Some(witness.polynomial), |_| None);
         Ok(Self {
-            domain: prover.starting_domain.clone(),
+            domain_size: prover.starting_domain_size(),
+            next_domain_gen: F::two_adic_generator(
+                prover.starting_domain_size().ilog2() as usize - prover.folding_factor.at_round(0),
+            ),
             sumcheck_prover,
             folding_randomness,
-            initial_evaluations,
             merkle_prover_data: None,
             commitment_merkle_prover_data: witness.prover_data,
             randomness_vec,

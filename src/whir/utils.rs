@@ -35,12 +35,12 @@ pub const fn workload_size<T: Sized>() -> usize {
 /// ## Returns
 /// A sorted and deduplicated list of random query indices in the folded domain.
 pub fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
-    folded_domain_size_bits: usize,
+    folded_domain_size: usize,
     num_queries: usize,
     prover_state: &mut Chal,
 ) -> Vec<usize> {
     (0..num_queries)
-        .map(|_| prover_state.sample_bits(folded_domain_size_bits))
+        .map(|_| prover_state.sample_bits(folded_domain_size.ilog2() as usize))
         .collect()
 }
 
