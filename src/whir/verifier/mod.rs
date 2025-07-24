@@ -1,5 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
+use crate::whir::statement::Statement;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
@@ -21,7 +22,7 @@ use crate::{
         verifier::{ChallengerState, VerifierState},
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    whir::{Statement, parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds},
+    whir::{parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds},
 };
 
 pub mod sumcheck;
@@ -114,7 +115,6 @@ where
                 round_params.num_variables,
                 round_params.ood_samples,
             )?;
-
 
             // Verify in-domain challenges on the previous commitment.
             let stir_constraints = self.verify_stir_challenges(

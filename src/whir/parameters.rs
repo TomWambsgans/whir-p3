@@ -1,6 +1,5 @@
 use std::{any::TypeId, f64::consts::LOG2_10, marker::PhantomData};
 
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 
 use crate::{
@@ -72,7 +71,6 @@ impl<EF, F, Hash, C, Challenger> WhirConfig<EF, F, Hash, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
     #[allow(clippy::too_many_lines)]
     pub fn new(

@@ -3,7 +3,7 @@ use std::ops::Deref;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use round::RoundState;
@@ -106,7 +106,7 @@ where
     /// - Panics if OOD data is non-empty despite `initial_statement = false`
     fn validate_witness<const DIGEST_ELEMS: usize>(
         &self,
-        witness: &Witness<EF, F, DenseMatrix<F>, DIGEST_ELEMS>,
+        witness: &Witness<EF, F, DIGEST_ELEMS>,
     ) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         if !self.initial_statement {
@@ -143,7 +143,7 @@ where
         dft: &EvalsDft<F>,
         prover_state: &mut ProverState<F, EF, Challenger>,
         statement: Statement<EF>,
-        witness: Witness<EF, F, DenseMatrix<F>, DIGEST_ELEMS>,
+        witness: Witness<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<(MultilinearPoint<EF>, Vec<EF>)>
     where
         H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
@@ -199,7 +199,7 @@ where
         round_index: usize,
         dft: &EvalsDft<F>,
         prover_state: &mut ProverState<F, EF, Challenger>,
-        round_state: &mut RoundState<EF, F, F, DenseMatrix<F>, DIGEST_ELEMS>,
+        round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
         H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
@@ -430,7 +430,7 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<F, EF, Challenger>,
-        round_state: &mut RoundState<EF, F, F, DenseMatrix<F>, DIGEST_ELEMS>,
+        round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
         folded_evaluations: &EvaluationsList<EF>,
     ) -> ProofResult<()>
     where
@@ -547,7 +547,7 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<F, EF, Challenger>,
-        round_state: &RoundState<EF, F, F, DenseMatrix<F>, DIGEST_ELEMS>,
+        round_state: &RoundState<EF, F, DIGEST_ELEMS>,
         num_variables: usize,
         round_params: &RoundConfig<EF>,
         ood_points: Vec<EF>,

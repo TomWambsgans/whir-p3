@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 
-use super::domain_separator::DomainSeparator;
 use crate::{fiat_shamir::ChallengSampler, utils::flatten_scalars_to_base};
 
 /// State held by the prover in a Fiat-Shamir protocol.
@@ -14,9 +13,6 @@ use crate::{fiat_shamir::ChallengSampler, utils::flatten_scalars_to_base};
 /// hints and proof-of-work (PoW) grinding mechanisms.
 #[derive(Debug)]
 pub struct ProverState<F, EF, Challenger>
-where
-    F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
     /// Cryptographic challenger used to sample challenges and observe data.
     challenger: Challenger,
@@ -44,12 +40,10 @@ where
     /// # Returns
     /// A fresh `ProverState` ready to accumulate data.
     #[must_use]
-    pub fn new(domain_separator: &DomainSeparator<EF, F>, mut challenger: Challenger) -> Self
+    pub fn new(challenger: Challenger) -> Self
     where
         Challenger: Clone,
     {
-        challenger.observe_slice(&domain_separator.as_field_elements());
-
         Self {
             challenger,
             proof_data: Vec::new(),

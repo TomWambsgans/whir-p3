@@ -2,7 +2,6 @@ use p3_challenger::{DuplexChallenger, FieldChallenger, GrindingChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
-use super::domain_separator::DomainSeparator;
 use crate::{
     fiat_shamir::{ChallengSampler, errors::ProofError},
     utils::pack_scalars_to_extension,
@@ -13,11 +12,7 @@ use crate::{
 /// This struct reconstructs the transcript provided by the prover, consumes proof data,
 /// and manages a cryptographic challenger to derive challenges deterministically.
 #[derive(Debug)]
-pub struct VerifierState<F, EF, Challenger>
-where
-    F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
-{
+pub struct VerifierState<F, EF, Challenger> {
     /// Cryptographic challenger used for sampling challenges and observing proof data.
     challenger: Challenger,
 
@@ -47,15 +42,7 @@ where
     /// # Returns
     /// A new `VerifierState` ready to consume proof data and derive challenges.
     #[must_use]
-    pub fn new(
-        domain_separator: &DomainSeparator<EF, F>,
-        proof_data: Vec<F>,
-        mut challenger: Challenger,
-    ) -> Self {
-        // Observe the domain separator elements to initialize the challenger consistently.
-        let iop_units = domain_separator.as_field_elements();
-        challenger.observe_slice(&iop_units);
-
+    pub fn new(proof_data: Vec<F>, challenger: Challenger) -> Self {
         Self {
             challenger,
             proof_data,

@@ -12,7 +12,7 @@ use tracing_forest::{ForestLayer, util::LevelFilter};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::{
     dft::EvalsDft,
-    fiat_shamir::domain_separator::DomainSeparator,
+    fiat_shamir::{prover::ProverState, verifier::VerifierState},
     parameters::{
         DEFAULT_MAX_POW, FoldingFactor, MultivariateParameters, ProtocolParameters,
         errors::SecurityAssumption,
@@ -155,9 +155,6 @@ fn main() {
     }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
-    let domainsep = DomainSeparator::new(vec![]);
-    // domainsep.commit_statement::<_, _, _, 32>(&params);
-    // domainsep.add_whir_proof::<_, _, _, 32>(&params);
 
     println!("=========================================");
     println!("Whir (PCS) 🌪️");
@@ -168,7 +165,7 @@ fn main() {
     let challenger = MyChallenger::new(poseidon16);
 
     // Initialize the Merlin transcript from the IOPattern
-    let mut prover_state = domainsep.to_prover_state(challenger.clone());
+    let mut prover_state = ProverState::new(challenger.clone());
 
     // Commit to the polynomial and produce a witness
     let committer = CommitmentWriter::new(&params);
@@ -198,8 +195,7 @@ fn main() {
     let verifier = Verifier::new(&params);
 
     // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
-    let mut verifier_state =
-        domainsep.to_verifier_state(prover_state.proof_data().to_vec(), challenger);
+    let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
     let parsed_commitment = commitment_reader
