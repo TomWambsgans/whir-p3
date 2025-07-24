@@ -9,7 +9,7 @@ use crate::{
         verifier::VerifierState,
     },
     poly::{dense::WhirDensePolynomial, multilinear::MultilinearPoint},
-    sumcheck::{sumcheck_polynomial::SumcheckPolynomial, K_SKIP_SUMCHECK},
+    sumcheck::{sumcheck_polynomial::SumcheckPolynomial, K_SKIP_SUMCHECK},  PF,
 };
 
 /// The full vector of folding randomness values, in reverse round order.
@@ -44,7 +44,7 @@ type SumcheckRandomness<F> = MultilinearPoint<F>;
 ///
 /// - A `MultilinearPoint` of folding randomness values in reverse order.
 pub(crate) fn verify_sumcheck_rounds<EF, F, Challenger>(
-    verifier_state: &mut VerifierState<F, EF, Challenger>,
+    verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
     claimed_sum: &mut EF,
     rounds: usize,
     pow_bits: usize,
@@ -52,8 +52,8 @@ pub(crate) fn verify_sumcheck_rounds<EF, F, Challenger>(
 ) -> ProofResult<SumcheckRandomness<EF>>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
 {
     // Calculate how many `(poly, rand)` pairs to expect based on skip mode
     //

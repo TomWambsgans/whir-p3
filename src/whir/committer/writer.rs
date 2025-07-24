@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_commit::Mmcs;
+use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -11,6 +11,7 @@ use tracing::{info_span, instrument};
 
 use super::Witness;
 use crate::{
+     PF, PFPacking,
     dft::EvalsDft,
     fiat_shamir::{errors::ProofResult, prover::ProverState},
     poly::evals::EvaluationsList,
@@ -35,9 +36,11 @@ where
 
 impl<'a, EF, F, H, C, Challenger> CommitmentWriter<'a, EF, F, H, C, Challenger>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    F: Field,
+    EF: ExtensionField<F> + ExtensionField<PF<F>>,
+    PF<F>: TwoAdicField,
+    F: ExtensionField<PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
 {
     /// Create a new writer that borrows the WHIR protocol configuration.
     pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
@@ -56,18 +59,18 @@ where
     #[instrument(skip_all)]
     pub fn commit<const DIGEST_ELEMS: usize>(
         &self,
-        dft: &EvalsDft<F>,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        dft: &EvalsDft<PF<F>>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         polynomial: EvaluationsList<F>,
     ) -> ProofResult<Witness<EF, F, DIGEST_ELEMS>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
-            + CryptographicHasher<F::Packing, [F::Packing; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[F::Packing; DIGEST_ELEMS], 2>
-            + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+    + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
+    + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+    + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
+    + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let evals_repeated = info_span!("repeating evals")
             .in_scope(|| parallel_repeat(polynomial.evals(), 1 << self.starting_log_inv_rate));
@@ -76,22 +79,23 @@ where
         let width = 1 << self.folding_factor.at_round(0);
         let folded_matrix = info_span!("dft", height = evals_repeated.len() / width, width)
             .in_scope(|| {
-                dft.dft_batch_by_evals(RowMajorMatrix::new(evals_repeated, width))
+                dft.dft_algebra_batch_by_evals(RowMajorMatrix::new(evals_repeated, width))
                     .to_row_major_matrix()
             });
 
         // Commit to the Merkle tree
-        let merkle_tree = MerkleTreeMmcs::<F::Packing, F::Packing, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PFPacking<F>, PFPacking<F>, H, C, DIGEST_ELEMS>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
+        let extension_mmcs_f = ExtensionMmcs::<PF<F>, F, _>::new(mmcs.clone());
         let (root, prover_data) =
-            info_span!("commit_matrix").in_scope(|| merkle_tree.commit_matrix(folded_matrix));
+            info_span!("commit matrix").in_scope(|| extension_mmcs_f.commit_matrix(folded_matrix));
 
         prover_state.add_base_scalars(root.as_ref());
 
         // Handle OOD (Out-Of-Domain) samples
-        let (ood_points, ood_answers) = sample_ood_points(
+        let (ood_points, ood_answers) = sample_ood_points::<F, EF, _, _>(
             prover_state,
             self.committment_ood_samples,
             self.mv_parameters.num_variables,

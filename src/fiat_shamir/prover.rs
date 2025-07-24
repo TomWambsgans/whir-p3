@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 
-use crate::{fiat_shamir::ChallengSampler, utils::flatten_scalars_to_base};
+use crate::{fiat_shamir::BitsSampler, utils::flatten_scalars_to_base};
 
 /// State held by the prover in a Fiat-Shamir protocol.
 ///
@@ -12,8 +12,7 @@ use crate::{fiat_shamir::ChallengSampler, utils::flatten_scalars_to_base};
 /// maintains the current transcript for challenge derivation, and supports
 /// hints and proof-of-work (PoW) grinding mechanisms.
 #[derive(Debug)]
-pub struct ProverState<F, EF, Challenger>
-{
+pub struct ProverState<F, EF, Challenger> {
     /// Cryptographic challenger used to sample challenges and observe data.
     challenger: Challenger,
 
@@ -150,16 +149,12 @@ where
     }
 }
 
-impl<F, EF, Challenger> ChallengSampler<EF> for ProverState<F, EF, Challenger>
+impl<F, EF, Challenger> BitsSampler<F> for ProverState<F, EF, Challenger>
 where
     EF: ExtensionField<F>,
     F: Field,
     Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
-    fn sample(&mut self) -> EF {
-        self.sample()
-    }
-
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.sample_bits(bits)
     }

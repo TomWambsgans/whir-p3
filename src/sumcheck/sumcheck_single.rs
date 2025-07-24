@@ -16,7 +16,7 @@ use crate::{
         multilinear::MultilinearPoint,
     },
     sumcheck::utils::sumcheck_quadratic,
-    whir::statement::Statement,
+    whir::statement::Statement,  PF,
 };
 
 /// Implements the single-round sumcheck protocol for verifying a multilinear polynomial evaluation.
@@ -355,7 +355,7 @@ where
     #[instrument(skip_all)]
     pub fn compute_sumcheck_polynomials<Challenger>(
         &mut self,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         folding_factor: usize,
         pow_bits: usize,
         k_skip: Option<usize>,
@@ -363,7 +363,8 @@ where
     where
         F: TwoAdicField,
         EF: TwoAdicField,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+        EF: ExtensionField<PF<F>>,
     {
         // Will store the verifier's folding challenges for each round.
         let mut res = Vec::with_capacity(folding_factor);

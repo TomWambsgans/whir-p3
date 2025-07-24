@@ -1,10 +1,11 @@
 use std::{fmt::Debug, ops::Deref};
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
+   PF,
     fiat_shamir::{errors::ProofResult, verifier::VerifierState},
     whir::{
         parameters::WhirConfig,
@@ -17,28 +18,25 @@ use crate::{
 /// This includes the Merkle root of the committed table and any out-of-domain (OOD)
 /// query points and their corresponding answers, which are required for verifier checks.
 #[derive(Debug, Clone)]
-pub struct ParsedCommitment<F, D> {
+pub struct ParsedCommitment<F: PrimeCharacteristicRing, EF,  const DIGEST_ELEMS: usize> {
     /// Number of variables in the committed polynomial.
     pub num_variables: usize,
 
     /// Merkle root of the committed evaluation table.
     ///
     /// This hash is used by the verifier to check Merkle proofs of queried evaluations.
-    pub root: D,
+    pub root: Hash<PF<F>, PF<F>, DIGEST_ELEMS>,
 
     /// Points queried by the verifier outside the low-degree evaluation domain.
     ///
     /// These are chosen using Fiat-Shamir and used to test polynomial consistency.
-    pub ood_points: Vec<F>,
+    pub ood_points: Vec<EF>,
 
     /// Answers (evaluations) of the committed polynomial at the corresponding `ood_points`.
-    pub ood_answers: Vec<F>,
+    pub ood_answers: Vec<EF>,
 }
 
-impl<F, D> ParsedCommitment<F, D>
-where
-    F: Field,
-{
+impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize> ParsedCommitment<F, EF, DIGEST_ELEMS> {
     /// Parse a commitment from the verifier's transcript state.
     ///
     /// This function extracts a `ParsedCommitment` by reading the Merkle root,
@@ -60,15 +58,16 @@ where
     /// - The prover's claimed answers at those points.
     ///
     /// This is used to verify consistency of polynomial commitments in WHIR.
-    pub fn parse<EF, Challenger, const DIGEST_ELEMS: usize>(
-        verifier_state: &mut VerifierState<F, EF, Challenger>,
+    pub fn parse<Challenger>(
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         num_variables: usize,
         ood_samples: usize,
-    ) -> ProofResult<ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>>
+    ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>>
     where
         F: TwoAdicField,
         EF: ExtensionField<F> + TwoAdicField,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+        EF: ExtensionField<PF<F>>,
     {
         // Read the Merkle root hash committed by the prover.
         let root = verifier_state
@@ -104,7 +103,7 @@ where
     /// Each constraint enforces that the committed polynomial evaluates to the
     /// claimed `ood_answer` at the corresponding `ood_point`, using a univariate
     /// equality weight over `num_variables` inputs.
-    pub fn oods_constraints(&self) -> Vec<Constraint<F>> {
+    pub fn oods_constraints(&self) -> Vec<Constraint<EF>> {
         self.ood_points
             .iter()
             .zip(&self.ood_answers)
@@ -135,8 +134,8 @@ where
 impl<'a, EF, F, H, C, Challenger> CommitmentReader<'a, EF, F, H, C, Challenger>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
 {
     /// Create a new commitment reader from a WHIR configuration.
     ///
@@ -151,9 +150,9 @@ where
     /// expected for verifying the committed polynomial.
     pub fn parse_commitment<const DIGEST_ELEMS: usize>(
         &self,
-        verifier_state: &mut VerifierState<F, EF, Challenger>,
-    ) -> ProofResult<ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>> {
-        ParsedCommitment::<_, Hash<F, F, DIGEST_ELEMS>>::parse(
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+    ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>> {
+        ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
             verifier_state,
             self.mv_parameters.num_variables,
             self.committment_ood_samples,

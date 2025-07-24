@@ -9,13 +9,7 @@ pub mod verifier;
 /// deterministically generate random challenges from a transcript using a cryptographic
 /// challenger. The challenges are used to drive non-interactive proofs or interactive
 /// proof reductions.
-pub trait ChallengSampler<F> {
-    /// Sample a new random element from the extension field `F`.
-    ///
-    /// # Returns
-    /// A freshly sampled challenge element in `F`, derived from the current transcript state.
-    fn sample(&mut self) -> F;
-
+pub trait BitsSampler<F> {
     /// Sample a uniformly random integer consisting of a given number of bits.
     ///
     /// # Arguments

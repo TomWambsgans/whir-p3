@@ -3,7 +3,8 @@ use p3_field::{ExtensionField, Field};
 use tracing::instrument;
 
 use crate::{
-    fiat_shamir::{ChallengSampler, prover::ProverState},
+    PF,
+    fiat_shamir::{BitsSampler, prover::ProverState},
     poly::multilinear::MultilinearPoint,
 };
 
@@ -33,15 +34,11 @@ pub const fn workload_size<T: Sized>() -> usize {
 ///
 /// ## Returns
 /// A sorted and deduplicated list of random query indices in the folded domain.
-pub fn get_challenge_stir_queries<Chal: ChallengSampler<EF>, F, EF>(
+pub fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
     folded_domain_size_bits: usize,
     num_queries: usize,
     prover_state: &mut Chal,
-) -> Vec<usize>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
+) -> Vec<usize> {
     (0..num_queries)
         .map(|_| prover_state.sample_bits(folded_domain_size_bits))
         .collect()
@@ -52,14 +49,15 @@ where
 /// This should be used on the prover side.
 #[instrument(skip_all)]
 pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E, Challenger>(
-    prover_state: &mut ProverState<F, EF, Challenger>,
+    prover_state: &mut ProverState<PF<F>, EF, Challenger>,
     num_samples: usize,
     num_variables: usize,
     evaluate_fn: E,
 ) -> (Vec<EF>, Vec<EF>)
 where
     E: Fn(&MultilinearPoint<EF>) -> EF,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+    EF: ExtensionField<PF<F>>,
 {
     let mut ood_points = EF::zero_vec(num_samples);
     let mut ood_answers = Vec::with_capacity(num_samples);

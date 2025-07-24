@@ -4,13 +4,14 @@ use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
+    PF,
     domain::Domain,
     fiat_shamir::{errors::ProofResult, prover::ProverState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::{sumcheck_single::SumcheckSingle, K_SKIP_SUMCHECK},
+    sumcheck::{K_SKIP_SUMCHECK, sumcheck_single::SumcheckSingle},
     whir::{
-        committer::{CommitmentMerkleTree, RoundMerkleTree, Witness},
-        statement::{weights::Weights, Statement},
+        committer::{RoundMerkleTree, Witness},
+        statement::{Statement, weights::Weights},
     },
 };
 
@@ -48,11 +49,11 @@ where
 
     /// Merkle commitment prover data for the **base field** polynomial from the first round.
     /// This is used to open values at queried locations.
-    pub(crate) commitment_merkle_prover_data: CommitmentMerkleTree<F, DIGEST_ELEMS>,
+    pub(crate) commitment_merkle_prover_data: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
 
     /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
     /// Present only after the first round.
-    pub(crate) merkle_prover_data: Option<RoundMerkleTree<F, EF, DIGEST_ELEMS>>,
+    pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<F>, EF, DIGEST_ELEMS>>,
 
     /// Flat vector of challenge values used across all rounds.
     /// Populated progressively as folding randomness is sampled.
@@ -69,6 +70,8 @@ impl<EF, F, const DIGEST_ELEMS: usize> RoundState<EF, F, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
+    F: ExtensionField<PF<F>>,
+    EF: ExtensionField<PF<F>>,
 {
     /// Initializes the prover’s state for the first round of the WHIR protocol.
     ///
@@ -92,12 +95,12 @@ where
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
         prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         mut statement: Statement<EF>,
         witness: Witness<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<Self>
     where
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
     {
         // Convert witness ood_points into constraints
         let new_constraints = witness

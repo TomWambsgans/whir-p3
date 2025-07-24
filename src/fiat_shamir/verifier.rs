@@ -3,7 +3,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
 use crate::{
-    fiat_shamir::{ChallengSampler, errors::ProofError},
+    fiat_shamir::{BitsSampler, errors::ProofError},
     utils::pack_scalars_to_extension,
 };
 
@@ -207,16 +207,12 @@ where
     }
 }
 
-impl<F, EF, Challenger> ChallengSampler<EF> for VerifierState<F, EF, Challenger>
+impl<F, EF, Challenger> BitsSampler<F> for VerifierState<F, EF, Challenger>
 where
     EF: ExtensionField<F>,
     F: Field,
     Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
-    fn sample(&mut self) -> EF {
-        self.sample()
-    }
-
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.sample_bits(bits)
     }

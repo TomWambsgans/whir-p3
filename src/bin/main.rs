@@ -3,7 +3,7 @@ use std::time::Instant;
 use clap::Parser;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::{PrimeField64, extension::BinomialExtensionField};
+use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing,  PrimeField64};
 use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
@@ -14,32 +14,33 @@ use whir_p3::{
     dft::EvalsDft,
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
     parameters::{
-        DEFAULT_MAX_POW, FoldingFactor, MultivariateParameters, ProtocolParameters,
-        errors::SecurityAssumption,
+        errors::SecurityAssumption, FoldingFactor, MultivariateParameters, ProtocolParameters, DEFAULT_MAX_POW
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::{
         committer::{reader::CommitmentReader, writer::CommitmentWriter},
         parameters::WhirConfig,
         prover::Prover,
-        statement::{Statement, weights::Weights},
+        statement::{weights::Weights, Statement},
         verifier::Verifier,
-    },
+    }, 
 };
 
-type F = KoalaBear;
-type EF = BinomialExtensionField<F, 8>;
+type F = BinomialExtensionField<KoalaBear, 8>;
+type EF = BinomialExtensionField<KoalaBear, 8>;
 type _F = BabyBear;
 type _EF = BinomialExtensionField<_F, 5>;
 type __F = Goldilocks;
 type __EF = BinomialExtensionField<__F, 2>;
+
+type FPrimeSubfield = <F as PrimeCharacteristicRing>::PrimeSubfield;
 
 type Poseidon16 = Poseidon2KoalaBear<16>;
 type Poseidon24 = Poseidon2KoalaBear<24>;
 
 type MerkleHash = PaddingFreeSponge<Poseidon24, 24, 16, 8>; // leaf hashing
 type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 compression
-type MyChallenger = DuplexChallenger<F, Poseidon16, 16, 8>;
+type MyChallenger = DuplexChallenger<FPrimeSubfield, Poseidon16, 16, 8>;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -50,7 +51,7 @@ struct Args {
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "25")]
+    #[arg(short = 'd', long, default_value = "22")]
     num_variables: usize,
 
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
@@ -59,7 +60,7 @@ struct Args {
     #[arg(short = 'r', long, default_value = "1")]
     rate: usize,
 
-    #[arg(long = "fold-first", default_value = "7")]
+    #[arg(long = "fold-first", default_value = "4")]
     first_folding_factor: usize,
 
     #[arg(long = "fold-others", default_value = "4")]
@@ -68,7 +69,7 @@ struct Args {
     #[arg(long = "sec", default_value = "CapacityBound")]
     soundness_type: SecurityAssumption,
 
-    #[arg(long = "initial-rs-reduction", default_value = "5")]
+    #[arg(long = "initial-rs-reduction", default_value = "1")]
     rs_domain_initial_reduction_factor: usize,
 }
 
@@ -170,7 +171,7 @@ fn main() {
     // Commit to the polynomial and produce a witness
     let committer = CommitmentWriter::new(&params);
 
-    let dft = EvalsDft::<F>::new(1 << params.max_fft_size());
+    let dft = EvalsDft::<FPrimeSubfield>::new(1 << params.max_fft_size());
 
     let time = Instant::now();
     let witness = committer
@@ -214,7 +215,7 @@ fn main() {
         commit_time.as_millis(),
         opening_time.as_millis()
     );
-    let proof_size = prover_state.proof_data().len() as f64 * (F::ORDER_U64 as f64).log2() / 8.0;
+    let proof_size = prover_state.proof_data().len() as f64 * (FPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
     println!("proof size: {:.2} KiB", proof_size / 1024.0);
     println!("Verification time: {} μs", verify_time.as_micros());
 }

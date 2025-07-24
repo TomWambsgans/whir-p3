@@ -5,13 +5,15 @@ use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
+use p3_symmetric::CryptographicHasher;
+use p3_symmetric::PseudoCompressionFunction;
 use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use super::{committer::Witness, parameters::WhirConfig, statement::Statement};
 use crate::{
+    PF, PFPacking,
     dft::EvalsDft,
     fiat_shamir::{errors::ProofResult, prover::ProverState},
     poly::{
@@ -19,7 +21,7 @@ use crate::{
         multilinear::MultilinearPoint,
     },
     sumcheck::sumcheck_single::SumcheckSingle,
-    utils::parallel_repeat,
+    utils::{flatten_scalars_to_base, parallel_repeat},
     whir::{
         parameters::RoundConfig,
         statement::weights::Weights,
@@ -57,7 +59,9 @@ impl<EF, F, H, C, Challenger> Prover<'_, EF, F, H, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    F: ExtensionField<PF<F>>,
+    EF: ExtensionField<PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
 {
     /// Validates that the total number of variables expected by the prover configuration
     /// matches the number implied by the folding schedule and the final rounds.
@@ -140,19 +144,20 @@ where
     #[instrument(skip_all)]
     pub fn prove<const DIGEST_ELEMS: usize>(
         &self,
-        dft: &EvalsDft<F>,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        dft: &EvalsDft<PF<F>>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement: Statement<EF>,
         witness: Witness<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
-            + CryptographicHasher<F::Packing, [F::Packing; DIGEST_ELEMS]>
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
             + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[F::Packing; DIGEST_ELEMS], 2>
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
             + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<F>: TwoAdicField,
     {
         // Validate parameters
         assert!(
@@ -186,18 +191,19 @@ where
     fn round<const DIGEST_ELEMS: usize>(
         &self,
         round_index: usize,
-        dft: &EvalsDft<F>,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        dft: &EvalsDft<PF<F>>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
-            + CryptographicHasher<F::Packing, [F::Packing; DIGEST_ELEMS]>
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
             + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[F::Packing; DIGEST_ELEMS], 2>
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
             + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<F>: TwoAdicField,
     {
         // - If a sumcheck already exists, use its evaluations
         // - Otherwise, fold the evaluations from the previous round
@@ -252,18 +258,20 @@ where
             })
         });
 
-        let mmcs = MerkleTreeMmcs::<F::Packing, F::Packing, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PFPacking<F>, PFPacking<F>, H, C, DIGEST_ELEMS>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
-        let extension_mmcs = ExtensionMmcs::new(mmcs.clone());
+        let extension_mmcs_f = ExtensionMmcs::<PF<F>, F, _>::new(mmcs.clone());
+        let extension_mmcs_ef = ExtensionMmcs::<PF<F>, EF, _>::new(mmcs.clone());
+
         let (root, prover_data) =
-            info_span!("commit matrix").in_scope(|| extension_mmcs.commit_matrix(folded_matrix));
+            info_span!("commit matrix").in_scope(|| extension_mmcs_ef.commit_matrix(folded_matrix));
 
         prover_state.add_base_scalars(root.as_ref());
 
         // Handle OOD (Out-Of-Domain) samples
-        let (ood_points, ood_answers) = sample_ood_points(
+        let (ood_points, ood_answers) = sample_ood_points::<F, EF, _, _>(
             prover_state,
             round_params.ood_samples,
             num_variables,
@@ -285,18 +293,18 @@ where
         // Collect Merkle proofs for stir queries
         let stir_evaluations = match &round_state.merkle_prover_data {
             None => {
-                let mut answers = Vec::with_capacity(stir_challenges_indexes.len());
+                let mut answers = Vec::<Vec<F>>::with_capacity(stir_challenges_indexes.len());
                 let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                 for challenge in &stir_challenges_indexes {
-                    let commitment =
-                        mmcs.open_batch(*challenge, &round_state.commitment_merkle_prover_data);
+                    let commitment = extension_mmcs_f
+                        .open_batch(*challenge, &round_state.commitment_merkle_prover_data);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
                 }
 
                 // merkle leaves
                 for answer in &answers {
-                    prover_state.hint_base_scalars(answer);
+                    prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
                 }
 
                 // merkle authentication proof
@@ -324,7 +332,7 @@ where
                 let mut answers = Vec::with_capacity(stir_challenges_indexes.len());
                 let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                 for challenge in &stir_challenges_indexes {
-                    let commitment = extension_mmcs.open_batch(*challenge, data);
+                    let commitment = extension_mmcs_ef.open_batch(*challenge, data);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
                 }
@@ -418,18 +426,18 @@ where
     fn final_round<const DIGEST_ELEMS: usize>(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
         folded_evaluations: &EvaluationsList<EF>,
     ) -> ProofResult<()>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]>
-            + CryptographicHasher<F::Packing, [F::Packing; DIGEST_ELEMS]>
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
             + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[F::Packing; DIGEST_ELEMS], 2>
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
             + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(folded_evaluations.evals());
@@ -443,7 +451,7 @@ where
             get_challenge_stir_queries(next_domain_log_size, self.final_queries, prover_state);
 
         // Every query requires opening these many in the previous Merkle tree
-        let mmcs = MerkleTreeMmcs::<F::Packing, F::Packing, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PFPacking<F>, PFPacking<F>, H, C, DIGEST_ELEMS>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
@@ -451,7 +459,7 @@ where
 
         match &round_state.merkle_prover_data {
             None => {
-                let mut answers = Vec::with_capacity(final_challenge_indexes.len());
+                let mut answers = Vec::<Vec<PF<F>>>::with_capacity(final_challenge_indexes.len());
                 let mut merkle_proofs = Vec::with_capacity(final_challenge_indexes.len());
 
                 for challenge in final_challenge_indexes {
@@ -535,7 +543,7 @@ where
     fn compute_stir_queries<const DIGEST_ELEMS: usize>(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<F, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         round_state: &RoundState<EF, F, DIGEST_ELEMS>,
         num_variables: usize,
         round_params: &RoundConfig<EF>,
@@ -543,7 +551,7 @@ where
     ) -> ProofResult<(Vec<MultilinearPoint<EF>>, Vec<usize>)> {
         let next_domain_log_size =
             round_state.domain.size().ilog2() as usize - self.folding_factor.at_round(round_index);
-        let stir_challenges_indexes = get_challenge_stir_queries(
+        let stir_challenges_indexes = get_challenge_stir_queries::<PF<F>, _>(
             next_domain_log_size,
             round_params.num_queries,
             prover_state,

@@ -1,9 +1,12 @@
 use std::{fmt::Debug, ops::Deref};
 
+use crate::PF;
+use crate::utils::pack_scalars_to_extension;
 use crate::whir::statement::Statement;
-use p3_challenger::{FieldChallenger, GrindingChallenger};
+use p3_challenger::FieldChallenger;
+use p3_challenger::GrindingChallenger;
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
@@ -43,8 +46,9 @@ where
 impl<'a, EF, F, H, C, Challenger> Verifier<'a, EF, F, H, C, Challenger>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + ChallengerState,
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
+    F: ExtensionField<PF<F>>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
         Self(params)
@@ -54,14 +58,18 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn verify<const DIGEST_ELEMS: usize>(
         &self,
-        verifier_state: &mut VerifierState<F, EF, Challenger>,
-        parsed_commitment: &ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement: &Statement<EF>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // During the rounds we collect constraints, combination randomness, folding randomness
         // and we update the claimed sum of constraint evaluation.
@@ -83,7 +91,7 @@ where
             round_constraints.push((combination_randomness, constraints));
 
             // Initial sumcheck
-            let folding_randomness = verify_sumcheck_rounds(
+            let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
                 verifier_state,
                 &mut claimed_sum,
                 self.folding_factor.at_round(0),
@@ -110,7 +118,7 @@ where
             let round_params = &self.round_parameters[round_index];
 
             // Receive commitment to the folded polynomial (likely encoded at higher expansion)
-            let new_commitment = ParsedCommitment::<_, Hash<F, F, DIGEST_ELEMS>>::parse(
+            let new_commitment = ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
                 verifier_state,
                 round_params.num_variables,
                 round_params.ood_samples,
@@ -136,7 +144,7 @@ where
                 self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
             round_constraints.push((combination_randomness.clone(), constraints));
 
-            let folding_randomness = verify_sumcheck_rounds(
+            let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
                 verifier_state,
                 &mut claimed_sum,
                 self.folding_factor.at_round(round_index + 1),
@@ -171,7 +179,7 @@ where
             .then_some(())
             .ok_or(ProofError::InvalidProof)?;
 
-        let final_sumcheck_randomness = verify_sumcheck_rounds(
+        let final_sumcheck_randomness = verify_sumcheck_rounds::<EF, F, _>(
             verifier_state,
             &mut claimed_sum,
             self.final_sumcheck_rounds,
@@ -219,7 +227,7 @@ where
     /// A vector of randomness values used to weight each constraint.
     pub fn combine_constraints(
         &self,
-        verifier_state: &mut VerifierState<F, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         claimed_sum: &mut EF,
         constraints: &[Constraint<EF>],
     ) -> ProofResult<Vec<EF>> {
@@ -263,22 +271,26 @@ where
     /// or the prover’s data does not match the commitment.
     pub fn verify_stir_challenges<const DIGEST_ELEMS: usize>(
         &self,
-        verifier_state: &mut VerifierState<F, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         params: &RoundConfig<EF>,
-        commitment: &ParsedCommitment<EF, Hash<F, F, DIGEST_ELEMS>>,
+        commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Constraint<EF>>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let leafs_base_field = round_index == 0;
 
         verifier_state.check_pow_grinding(params.pow_bits)?;
 
-        let stir_challenges_indexes = get_challenge_stir_queries(
+        let stir_challenges_indexes = get_challenge_stir_queries::<PF<F>, _>(
             params.domain_size.ilog2() as usize - params.folding_factor,
             params.num_queries,
             verifier_state,
@@ -344,31 +356,40 @@ where
     /// Returns `ProofError::InvalidProof` if any Merkle proof fails verification.
     pub fn verify_merkle_proof<const DIGEST_ELEMS: usize>(
         &self,
-        verifier_state: &mut VerifierState<F, EF, Challenger>,
-        root: &Hash<F, F, DIGEST_ELEMS>,
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        root: &Hash<PF<F>, PF<F>, DIGEST_ELEMS>,
         indices: &[usize],
         dimensions: &[Dimensions],
         leafs_base_field: bool,
         round_index: usize,
     ) -> ProofResult<Vec<Vec<EF>>>
     where
-        H: CryptographicHasher<F, [F; DIGEST_ELEMS]> + Sync,
-        C: PseudoCompressionFunction<[F; DIGEST_ELEMS], 2> + Sync,
-        [F; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
-        // Create a Merkle MMCS instance
-        let mmcs = MerkleTreeMmcs::new(self.merkle_hash.clone(), self.merkle_compress.clone());
-
-        // Wrap the MMCS in an extension-aware wrapper for EF leaf support.
-        let extension_mmcs = ExtensionMmcs::new(mmcs.clone());
+        let mmcs = MerkleTreeMmcs::<PF<F>, PF<F>, H, C, DIGEST_ELEMS>::new(
+            self.merkle_hash.clone(),
+            self.merkle_compress.clone(),
+        );
+        let extension_mmcs_f = ExtensionMmcs::<PF<F>, F, _>::new(mmcs.clone());
+        let extension_mmcs_ef = ExtensionMmcs::<PF<F>, EF, _>::new(mmcs.clone());
 
         // Branch depending on whether the committed leafs are base field or extension field.
         let res = if leafs_base_field {
             // Merkle leaves
-            let mut answers = vec![];
+            let mut answers = Vec::<Vec<F>>::new();
             let merkle_leaf_size = 1 << self.folding_factor.at_round(round_index);
             for _ in 0..indices.len() {
-                answers.push(verifier_state.receive_hint_base_scalars(merkle_leaf_size)?);
+                answers.push(pack_scalars_to_extension::<PF<F>, F>(
+                    &verifier_state.receive_hint_base_scalars(
+                        merkle_leaf_size * <F as BasedVectorSpace<PF<F>>>::DIMENSION,
+                    )?,
+                ));
             }
 
             // Merkle proofs
@@ -376,7 +397,7 @@ where
             for _ in 0..indices.len() {
                 let mut merkle_path = vec![];
                 for _ in 0..self.merkle_tree_height(round_index) {
-                    let digest: [F; DIGEST_ELEMS] = verifier_state
+                    let digest: [PF<F>; DIGEST_ELEMS] = verifier_state
                         .receive_hint_base_scalars(DIGEST_ELEMS)?
                         .try_into()
                         .unwrap();
@@ -388,16 +409,17 @@ where
             // For each queried index:
             for (i, &index) in indices.iter().enumerate() {
                 // Verify the Merkle opening for the claimed leaf against the Merkle root.
-                mmcs.verify_batch(
-                    root,
-                    dimensions,
-                    index,
-                    BatchOpeningRef {
-                        opened_values: &[answers[i].clone()],
-                        opening_proof: &merkle_proofs[i],
-                    },
-                )
-                .map_err(|_| ProofError::InvalidProof)?;
+                extension_mmcs_f
+                    .verify_batch(
+                        root,
+                        dimensions,
+                        index,
+                        BatchOpeningRef {
+                            opened_values: &[answers[i].clone()],
+                            opening_proof: &merkle_proofs[i],
+                        },
+                    )
+                    .map_err(|_| ProofError::InvalidProof)?;
             }
 
             // Convert the base field values to EF and collect them into a result vector.
@@ -418,7 +440,7 @@ where
             for _ in 0..indices.len() {
                 let mut merkle_path = vec![];
                 for _ in 0..self.merkle_tree_height(round_index) {
-                    let digest: [F; DIGEST_ELEMS] = verifier_state
+                    let digest: [PF<F>; DIGEST_ELEMS] = verifier_state
                         .receive_hint_base_scalars(DIGEST_ELEMS)?
                         .try_into()
                         .unwrap();
@@ -430,7 +452,7 @@ where
             // For each queried index:
             for (i, &index) in indices.iter().enumerate() {
                 // Verify the Merkle opening against the extension MMCS.
-                extension_mmcs
+                extension_mmcs_ef
                     .verify_batch(
                         root,
                         dimensions,
