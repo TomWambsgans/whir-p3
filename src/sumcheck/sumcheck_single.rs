@@ -215,15 +215,15 @@ where
 ///
 /// ## Returns
 /// The verifier's challenge `r` as an `EF` element.
-fn round<Challenger, F: Field, EF: ExtensionField<F>>(
-    prover_state: &mut ProverState<F, EF, Challenger>,
+fn round<Challenger, F: Field, EF: ExtensionField<F> + ExtensionField<PF<F>>>(
+    prover_state: &mut ProverState<PF<F>, EF, Challenger>,
     evals: &mut EvaluationsList<EF>,
     weights: &mut EvaluationsList<EF>,
     sum: &mut EF,
     pow_bits: usize,
 ) -> EF
 where
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
 {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
@@ -434,16 +434,15 @@ where
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
 
-        let (mut weights, mut sum) = statement.combine::<F>(combination_randomness);
+        let (mut weights, mut sum) = statement.combine::<PF<F>>(combination_randomness);
         // In the first round base field evaluations are folded into extension field elements
         let (r, mut evals) = initial_round(prover_state, evals, &mut weights, &mut sum, pow_bits);
         res.push(r);
 
         // Apply rest of sumcheck rounds
-        res.extend(
-            (1..folding_factor)
-                .map(|_| round(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)),
-        );
+        res.extend((1..folding_factor).map(|_| {
+            round::<_, F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)
+        }));
 
         // Reverse challenges to maintain order from X₀ to Xₙ.
         res.reverse();
@@ -518,7 +517,7 @@ where
         // Apply rest of sumcheck rounds
         res.extend(
             (k_skip..folding_factor)
-                .map(|_| round(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)),
+                .map(|_| round::<_, F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)),
         );
 
         // Reverse challenges to maintain order from X₀ to Xₙ.
@@ -645,7 +644,7 @@ where
         // Proceed with one-variable-per-round folding for remaining variables.
         let mut res = (0..folding_factor)
             .map(|_| {
-                round(
+                round::<_, F, EF>(
                     prover_state,
                     &mut self.evals,
                     &mut self.weights,
