@@ -1,10 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
-use crate::PF;
-use crate::utils::pack_scalars_to_extension;
-use crate::whir::statement::Statement;
-use p3_challenger::FieldChallenger;
-use p3_challenger::GrindingChallenger;
+use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
@@ -20,12 +16,16 @@ use super::{
     utils::get_challenge_stir_queries,
 };
 use crate::{
+    PF,
     fiat_shamir::{
         errors::{ProofError, ProofResult},
         verifier::{ChallengerState, VerifierState},
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    whir::{parameters::WhirConfig, verifier::sumcheck::verify_sumcheck_rounds},
+    utils::pack_scalars_to_extension,
+    whir::{
+        parameters::WhirConfig, statement::Statement, verifier::sumcheck::verify_sumcheck_rounds,
+    },
 };
 
 pub mod sumcheck;
@@ -96,7 +96,6 @@ where
                 &mut claimed_sum,
                 self.folding_factor.at_round(0),
                 self.starting_folding_pow_bits,
-                self.univariate_skip,
             )?;
             round_folding_randomness.push(folding_randomness);
         } else {
@@ -151,7 +150,6 @@ where
                 &mut claimed_sum,
                 self.folding_factor.at_round(round_index + 1),
                 round_params.folding_pow_bits,
-                false,
             )?;
 
             round_folding_randomness.push(folding_randomness);
@@ -186,7 +184,6 @@ where
             &mut claimed_sum,
             self.final_sumcheck_rounds,
             self.final_folding_pow_bits,
-            false,
         )?;
         round_folding_randomness.push(final_sumcheck_randomness.clone());
 

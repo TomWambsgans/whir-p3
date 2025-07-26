@@ -3,7 +3,7 @@ use std::time::Instant;
 use clap::Parser;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing,  PrimeField64};
+use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
@@ -12,16 +12,17 @@ use whir_p3::{
     dft::EvalsDft,
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
     parameters::{
-        errors::SecurityAssumption, FoldingFactor, MultivariateParameters, ProtocolParameters, DEFAULT_MAX_POW
+        DEFAULT_MAX_POW, FoldingFactor, MultivariateParameters, ProtocolParameters,
+        errors::SecurityAssumption,
     },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::{
         committer::{reader::CommitmentReader, writer::CommitmentWriter},
         parameters::WhirConfig,
         prover::Prover,
-        statement::{weights::Weights, Statement},
+        statement::{Statement, weights::Weights},
         verifier::Verifier,
-    }, 
+    },
 };
 
 type F = BinomialExtensionField<KoalaBear, 8>;
@@ -127,7 +128,6 @@ fn main() {
         soundness_type,
         starting_log_inv_rate: starting_rate,
         rs_domain_initial_reduction_factor,
-        univariate_skip: false,
     };
 
     let params =
@@ -213,7 +213,8 @@ fn main() {
         commit_time.as_millis(),
         opening_time.as_millis()
     );
-    let proof_size = prover_state.proof_data().len() as f64 * (FPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
+    let proof_size =
+        prover_state.proof_data().len() as f64 * (FPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
     println!("proof size: {:.2} KiB", proof_size / 1024.0);
     println!("Verification time: {} μs", verify_time.as_micros());
 }

@@ -2,7 +2,7 @@ use p3_field::{ExtensionField, Field};
 use p3_matrix::{dense::DenseMatrix, extension::FlatMatrixView};
 use p3_merkle_tree::MerkleTree;
 
-use crate::{poly::evals::EvaluationsList, PF};
+use crate::{PF, poly::evals::EvaluationsList};
 
 pub mod reader;
 pub mod writer;

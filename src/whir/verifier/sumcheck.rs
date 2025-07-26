@@ -1,15 +1,13 @@
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, TwoAdicField};
-use p3_interpolation::interpolate_subgroup;
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    PF,
     fiat_shamir::{
         errors::{ProofError, ProofResult},
         verifier::VerifierState,
     },
     poly::{dense::WhirDensePolynomial, multilinear::MultilinearPoint},
-    sumcheck::{sumcheck_polynomial::SumcheckPolynomial, K_SKIP_SUMCHECK},  PF,
 };
 
 /// The full vector of folding randomness values, in reverse round order.
@@ -48,70 +46,18 @@ pub(crate) fn verify_sumcheck_rounds<EF, F, Challenger>(
     claimed_sum: &mut EF,
     rounds: usize,
     pow_bits: usize,
-    is_univariate_skip: bool,
 ) -> ProofResult<SumcheckRandomness<EF>>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
     Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
 {
-    // Calculate how many `(poly, rand)` pairs to expect based on skip mode
-    //
-    // If skipping: we do 1 large round for the skip, and the remaining normally
-    let effective_rounds = if is_univariate_skip && rounds >= K_SKIP_SUMCHECK {
-        1 + (rounds - K_SKIP_SUMCHECK)
-    } else {
-        rounds
-    };
-
     // Preallocate vector to hold the randomness values
-    let mut randomness = Vec::with_capacity(effective_rounds);
+    let mut randomness = Vec::with_capacity(rounds);
 
-    // Handle the univariate skip case
-    if is_univariate_skip && rounds >= K_SKIP_SUMCHECK {
-        // Read `2^{k+1}` evaluations (size of coset domain) for the skipping polynomial
-        let evals: [EF; 1 << (K_SKIP_SUMCHECK + 1)] =
-            verifier_state.next_extension_scalars_const()?;
-
-        // Interpolate into a univariate polynomial (over the coset domain)
-        let poly = SumcheckPolynomial::new(evals.to_vec(), 1);
-
-        // Verify that the sum over the subgroup H of size 2^k matches the claimed sum.
-        //
-        // The prover sends evaluations on a coset of H.
-        // The even-indexed evaluations correspond to the points in H itself.
-        let actual_sum: EF = poly.evaluations().iter().step_by(2).copied().sum();
-        if actual_sum != *claimed_sum {
-            return Err(ProofError::InvalidProof);
-        }
-
-        // Sample the challenge scalar r₀ ∈ 𝔽 for this round
-        let rand = verifier_state.sample();
-
-        // Update the claimed sum using the univariate polynomial and randomness.
-        //
-        // We interpolate the univariate polynomial at the randomness point.
-        *claimed_sum =
-            interpolate_subgroup(&RowMajorMatrix::new_col(poly.evaluations().to_vec()), rand)[0];
-
-        // Record this round’s randomness
-        randomness.push(rand);
-
-        // Optional: apply proof-of-work query
-        verifier_state.check_pow_grinding(pow_bits)?;
-    }
-
-    // Continue with the remaining sumcheck rounds (each using 3 evaluations)
-    let start_round = if is_univariate_skip && rounds >= K_SKIP_SUMCHECK {
-        K_SKIP_SUMCHECK // skip the first k rounds
-    } else {
-        0
-    };
-
-    for _ in start_round..rounds {
+    for _ in 0..rounds {
         // Extract the 3 evaluations of the quadratic sumcheck polynomial h(X)
         let coeffs: [_; 3] = verifier_state.next_extension_scalars_const()?;
-
 
         let poly = WhirDensePolynomial::from_coefficients_vec(coeffs.to_vec());
 

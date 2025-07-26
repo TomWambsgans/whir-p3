@@ -69,22 +69,13 @@ impl<F: Field> Statement<F> {
     /// The number of variables in `w(X)` must match `self.num_variables`.
     pub fn add_constraint(&mut self, weights: Weights<F>, sum: F) {
         assert_eq!(weights.num_variables(), self.num_variables());
-        self.constraints.push(Constraint {
-            weights,
-            sum,
-        });
+        self.constraints.push(Constraint { weights, sum });
     }
 
     /// Inserts a constraint `(w(X), s)` at the front of the system.
     pub fn add_constraint_in_front(&mut self, weights: Weights<F>, sum: F) {
         assert_eq!(weights.num_variables(), self.num_variables());
-        self.constraints.insert(
-            0,
-            Constraint {
-                weights,
-                sum,
-            },
-        );
+        self.constraints.insert(0, Constraint { weights, sum });
     }
 
     /// Inserts multiple constraints at the front of the system.
@@ -103,10 +94,7 @@ impl<F: Field> Statement<F> {
             assert_eq!(weights.num_variables(), n);
 
             // Convert the pair into a full `Constraint` with `defer_evaluation = false`.
-            new_constraints.push(Constraint {
-                weights,
-                sum,
-            });
+            new_constraints.push(Constraint { weights, sum });
         }
 
         // Insert all new constraints at the beginning of the existing list.

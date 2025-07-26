@@ -1,7 +1,5 @@
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_interpolation::interpolate_subgroup;
-use p3_matrix::dense::RowMajorMatrix;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use tracing::instrument;
@@ -11,9 +9,7 @@ use crate::{
     PF,
     fiat_shamir::prover::ProverState,
     poly::{dense::WhirDensePolynomial, evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::{
-        sumcheck_single_skip::compute_skipping_sumcheck_polynomial, utils::sumcheck_quadratic,
-    },
+    sumcheck::utils::sumcheck_quadratic,
     whir::statement::Statement,
 };
 
@@ -443,82 +439,6 @@ where
         res.extend((1..folding_factor).map(|_| {
             round::<_, F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)
         }));
-
-        // Reverse challenges to maintain order from X₀ to Xₙ.
-        res.reverse();
-
-        let sumcheck = Self {
-            evals,
-            weights,
-            sum,
-            phantom: std::marker::PhantomData,
-        };
-
-        (sumcheck, MultilinearPoint(res))
-    }
-
-    /// Constructs a new `SumcheckSingle` instance from evaluations in the base field.
-    ///
-    /// This function:
-    /// - Uses precomputed evaluations of the polynomial `p` over the Boolean hypercube.
-    /// - Applies the given constraint `Statement` using a random linear combination.
-    /// - Initializes internal sumcheck state with weights and expected sum.
-    /// - Applies first set of sumcheck rounds with univariate skip optimization.
-    #[instrument(skip_all)]
-    pub fn with_skip<Challenger>(
-        evals: &EvaluationsList<F>,
-        statement: &Statement<EF>,
-        combination_randomness: EF,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        folding_factor: usize,
-        pow_bits: usize,
-        k_skip: usize,
-    ) -> (Self, MultilinearPoint<EF>)
-    where
-        F: TwoAdicField,
-        EF: TwoAdicField + ExtensionField<PF<F>>,
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
-    {
-        assert_ne!(folding_factor, 0);
-        let mut res = Vec::with_capacity(folding_factor);
-
-        assert!(k_skip > 1);
-        assert!(k_skip <= folding_factor);
-
-        let (weights, _sum) = statement.combine::<F>(combination_randomness);
-        // Collapse the first k variables via a univariate evaluation over a multiplicative coset.
-        let (sumcheck_poly, f_mat, w_mat) =
-            compute_skipping_sumcheck_polynomial(k_skip, evals, &weights);
-
-        prover_state.add_extension_scalars(sumcheck_poly.evaluations());
-
-        // Receive the verifier challenge for this entire collapsed round.
-        let r: EF = prover_state.sample();
-        res.push(r);
-
-        // Proof-of-work challenge to delay prover.
-        prover_state.pow_grinding(pow_bits);
-
-        // Interpolate the LDE matrices at the folding randomness to get the new "folded" polynomial state.
-        let new_p = interpolate_subgroup(&f_mat, r);
-        let new_w = interpolate_subgroup(&w_mat, r);
-
-        // Update polynomial and weights with reduced dimensionality.
-        let mut evals = EvaluationsList::new(new_p);
-        let mut weights = EvaluationsList::new(new_w);
-
-        // Compute the new target sum after folding.
-        let folded_poly_eval = interpolate_subgroup(
-            &RowMajorMatrix::new_col(sumcheck_poly.evaluations().to_vec()),
-            r,
-        );
-        let mut sum = folded_poly_eval[0];
-
-        // Apply rest of sumcheck rounds
-        res.extend(
-            (k_skip..folding_factor)
-                .map(|_| round::<_, F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)),
-        );
 
         // Reverse challenges to maintain order from X₀ to Xₙ.
         res.reverse();

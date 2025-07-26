@@ -5,21 +5,18 @@ use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::CryptographicHasher;
-use p3_symmetric::PseudoCompressionFunction;
+use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use super::{committer::Witness, parameters::WhirConfig, statement::Statement};
-use crate::fiat_shamir::verifier::ChallengerState;
-use crate::utils::flatten_scalars_to_base;
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
-    fiat_shamir::{errors::ProofResult, prover::ProverState},
+    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    utils::parallel_repeat,
+    utils::{flatten_scalars_to_base, parallel_repeat},
     whir::{
         parameters::RoundConfig,
         utils::{get_challenge_stir_queries, sample_ood_points},
@@ -202,7 +199,6 @@ where
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<F>: TwoAdicField,
     {
-
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables =
             self.mv_parameters.num_variables - self.folding_factor.total_number(round_index);
@@ -282,7 +278,7 @@ where
                 num_variables,
                 round_params,
                 &ood_points,
-                round_index
+                round_index,
             )?;
 
         // Collect Merkle proofs for stir queries
@@ -412,7 +408,7 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        round_state: &mut RoundState<EF, F,  DIGEST_ELEMS>,
+        round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -440,7 +436,6 @@ where
         // *before* receiving the queries, we make it computationally infeasible to "shop" for
         // favorable challenges. The grinding effectively "locks in" the prover's commitment.
         prover_state.pow_grinding(self.final_pow_bits);
-
 
         // Final verifier queries and answers. The indices are over the folded domain.
         let final_challenge_indexes = get_challenge_stir_queries(

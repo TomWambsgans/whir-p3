@@ -5,7 +5,7 @@ use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
-   PF,
+    PF,
     fiat_shamir::{errors::ProofResult, verifier::VerifierState},
     whir::{
         parameters::WhirConfig,
@@ -18,7 +18,7 @@ use crate::{
 /// This includes the Merkle root of the committed table and any out-of-domain (OOD)
 /// query points and their corresponding answers, which are required for verifier checks.
 #[derive(Debug, Clone)]
-pub struct ParsedCommitment<F: PrimeCharacteristicRing, EF,  const DIGEST_ELEMS: usize> {
+pub struct ParsedCommitment<F: PrimeCharacteristicRing, EF, const DIGEST_ELEMS: usize> {
     /// Number of variables in the committed polynomial.
     pub num_variables: usize,
 
@@ -36,7 +36,9 @@ pub struct ParsedCommitment<F: PrimeCharacteristicRing, EF,  const DIGEST_ELEMS:
     pub ood_answers: Vec<EF>,
 }
 
-impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize> ParsedCommitment<F, EF, DIGEST_ELEMS> {
+impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
+    ParsedCommitment<F, EF, DIGEST_ELEMS>
+{
     /// Parse a commitment from the verifier's transcript state.
     ///
     /// This function extracts a `ParsedCommitment` by reading the Merkle root,
