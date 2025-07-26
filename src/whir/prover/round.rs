@@ -113,44 +113,16 @@ where
 
         statement.add_constraints_in_front(new_constraints);
 
-        let (sumcheck_prover, folding_randomness) = if prover.initial_statement {
-            // If there is initial statement, then we run the sum-check for
-            // this initial statement.
-            let combination_randomness_gen: EF = prover_state.sample();
+        let combination_randomness_gen: EF = prover_state.sample();
 
-            // Create the sumcheck prover
-            let (sumcheck, folding_randomness) = SumcheckSingle::from_base_evals(
-                &witness.polynomial,
-                &statement,
-                combination_randomness_gen,
-                prover_state,
-                prover.folding_factor.at_round(0),
-                prover.starting_folding_pow_bits,
-            );
-
-            (sumcheck, folding_randomness)
-        } else {
-            // If there is no initial statement, there is no need to run the
-            // initial rounds of the sum-check, and the verifier directly sends
-            // the initial folding randomnesses.
-
-            let folding_randomness = MultilinearPoint(
-                (0..prover.folding_factor.at_round(0))
-                    .map(|_| prover_state.sample())
-                    .collect::<Vec<_>>(),
-            );
-
-            let poly = witness.polynomial.fold(&folding_randomness);
-            let num_variables = poly.num_variables();
-
-            // Create the sumcheck prover w/o running any rounds.
-            let sumcheck =
-                SumcheckSingle::from_extension_evals(poly, &Statement::new(num_variables), EF::ONE);
-
-            prover_state.pow_grinding(prover.starting_folding_pow_bits);
-
-            (sumcheck, folding_randomness)
-        };
+        let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
+            &witness.polynomial,
+            &statement,
+            combination_randomness_gen,
+            prover_state,
+            prover.folding_factor.at_round(0),
+            prover.starting_folding_pow_bits,
+        );
 
         let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
             let mut randomness_vec = Vec::with_capacity(prover.mv_parameters.num_variables);

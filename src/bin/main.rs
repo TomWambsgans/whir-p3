@@ -119,7 +119,6 @@ fn main() {
 
     // Construct WHIR protocol parameters
     let whir_params = ProtocolParameters {
-        initial_statement: true,
         security_level,
         pow_bits,
         folding_factor,

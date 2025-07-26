@@ -31,12 +31,6 @@ where
     pub max_pow_bits: usize,
 
     pub committment_ood_samples: usize,
-    // The WHIR protocol can prove either:
-    // 1. The commitment is a valid low degree polynomial. In that case, the initial statement is
-    //    set to false.
-    // 2. The commitment is a valid folded polynomial, and an additional polynomial evaluation
-    //    statement. In that case, the initial statement is set to true.
-    pub initial_statement: bool,
     pub starting_log_inv_rate: usize,
     pub starting_folding_pow_bits: usize,
 
@@ -105,37 +99,20 @@ where
             .folding_factor
             .compute_number_of_rounds(mv_parameters.num_variables);
 
-        let committment_ood_samples = if whir_parameters.initial_statement {
-            whir_parameters.soundness_type.determine_ood_samples(
-                whir_parameters.security_level,
-                num_variables,
-                log_inv_rate,
-                field_size_bits,
-            )
-        } else {
-            0
-        };
+        let committment_ood_samples = whir_parameters.soundness_type.determine_ood_samples(
+            whir_parameters.security_level,
+            num_variables,
+            log_inv_rate,
+            field_size_bits,
+        );
 
-        let starting_folding_pow_bits = if whir_parameters.initial_statement {
-            Self::folding_pow_bits(
-                whir_parameters.security_level,
-                whir_parameters.soundness_type,
-                field_size_bits,
-                num_variables,
-                log_inv_rate,
-            )
-        } else {
-            {
-                let prox_gaps_error = whir_parameters.soundness_type.prox_gaps_error(
-                    num_variables,
-                    log_inv_rate,
-                    field_size_bits,
-                    2,
-                ) + (whir_parameters.folding_factor.at_round(0) as f64)
-                    .log2();
-                (whir_parameters.security_level as f64 - prox_gaps_error).max(0.0)
-            }
-        };
+        let starting_folding_pow_bits = Self::folding_pow_bits(
+            whir_parameters.security_level,
+            whir_parameters.soundness_type,
+            field_size_bits,
+            num_variables,
+            log_inv_rate,
+        );
 
         let mut round_parameters = Vec::with_capacity(num_rounds);
         num_variables -= whir_parameters.folding_factor.at_round(0);
@@ -221,7 +198,6 @@ where
         Self {
             security_level: whir_parameters.security_level,
             max_pow_bits: whir_parameters.pow_bits,
-            initial_statement: whir_parameters.initial_statement,
             committment_ood_samples,
             mv_parameters,
             soundness_type: whir_parameters.soundness_type,

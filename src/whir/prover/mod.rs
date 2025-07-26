@@ -83,7 +83,6 @@ where
     /// `true` if the statement structure is valid for this protocol instance.
     fn validate_statement(&self, statement: &Statement<EF>) -> bool {
         statement.num_variables() == self.mv_parameters.num_variables
-            && (self.initial_statement || statement.constraints.is_empty())
     }
 
     /// Validates that the witness satisfies the structural requirements of the WHIR prover.
@@ -107,9 +106,6 @@ where
         witness: &Witness<EF, F, DIGEST_ELEMS>,
     ) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
-        if !self.initial_statement {
-            assert!(witness.ood_points.is_empty());
-        }
         witness.polynomial.num_variables() == self.mv_parameters.num_variables
     }
 

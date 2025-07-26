@@ -78,41 +78,24 @@ where
         let mut claimed_sum = EF::ZERO;
         let mut prev_commitment = parsed_commitment.clone();
 
-        // Optional initial sumcheck round
-        if self.initial_statement {
-            // Combine OODS and statement constraints to claimed_sum
-            let constraints: Vec<_> = prev_commitment
-                .oods_constraints()
-                .into_iter()
-                .chain(statement.constraints.iter().cloned())
-                .collect();
-            let combination_randomness =
-                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
-            round_constraints.push((combination_randomness, constraints));
+        // Combine OODS and statement constraints to claimed_sum
+        let constraints: Vec<_> = prev_commitment
+            .oods_constraints()
+            .into_iter()
+            .chain(statement.constraints.iter().cloned())
+            .collect();
+        let combination_randomness =
+            self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+        round_constraints.push((combination_randomness, constraints));
 
-            // Initial sumcheck
-            let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
-                verifier_state,
-                &mut claimed_sum,
-                self.folding_factor.at_round(0),
-                self.starting_folding_pow_bits,
-            )?;
-            round_folding_randomness.push(folding_randomness);
-        } else {
-            assert_eq!(prev_commitment.ood_points.len(), 0);
-            assert!(statement.constraints.is_empty());
-            round_constraints.push((vec![], vec![]));
-
-            let folding_randomness = MultilinearPoint(
-                (0..self.folding_factor.at_round(0))
-                    .map(|_| verifier_state.sample())
-                    .collect::<Vec<_>>(),
-            );
-
-            round_folding_randomness.push(folding_randomness);
-
-            verifier_state.check_pow_grinding(self.starting_folding_pow_bits)?;
-        }
+        // Initial sumcheck
+        let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+            verifier_state,
+            &mut claimed_sum,
+            self.folding_factor.at_round(0),
+            self.starting_folding_pow_bits,
+        )?;
+        round_folding_randomness.push(folding_randomness);
 
         for round_index in 0..self.n_rounds() {
             // Fetch round parameters from config
