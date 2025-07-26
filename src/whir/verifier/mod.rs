@@ -10,10 +10,8 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::{
-    committer::reader::ParsedCommitment,
-    parameters::RoundConfig,
-    statement::{constraint::Constraint, weights::Weights},
-    utils::get_challenge_stir_queries,
+    committer::reader::ParsedCommitment, parameters::RoundConfig,
+    statement::constraint::Constraint, utils::get_challenge_stir_queries,
 };
 use crate::{
     PF,
@@ -319,7 +317,10 @@ where
             .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
             .zip(&folds)
             .map(|(point, &value)| Constraint {
-                weights: Weights::univariate(EF::from(point), params.num_variables),
+                weights: MultilinearPoint::expand_from_univariate(
+                    EF::from(point),
+                    params.num_variables,
+                ),
                 sum: value,
             })
             .collect();
@@ -510,7 +511,7 @@ where
                 .iter()
                 .zip(randomness)
                 .map(|(constraint, &randomness)| {
-                    let value = constraint.weights.compute(&point);
+                    let value = constraint.weights.eq_poly_outside(&point);
                     value * randomness
                 })
                 .sum::<EF>();

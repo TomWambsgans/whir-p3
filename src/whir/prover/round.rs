@@ -10,7 +10,7 @@ use crate::{
     sumcheck::sumcheck_single::SumcheckSingle,
     whir::{
         committer::{RoundMerkleTree, Witness},
-        statement::{Statement, weights::Weights},
+        statement::Statement,
     },
 };
 
@@ -103,10 +103,10 @@ where
             .into_iter()
             .zip(witness.ood_answers)
             .map(|(point, evaluation)| {
-                let weights = Weights::evaluation(MultilinearPoint::expand_from_univariate(
+                let weights = MultilinearPoint::expand_from_univariate(
                     point,
                     prover.mv_parameters.num_variables,
-                ));
+                );
                 (weights, evaluation)
             })
             .collect();

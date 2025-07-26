@@ -1,9 +1,10 @@
 use p3_field::{ExtensionField, Field};
 use tracing::instrument;
-use weights::Weights;
 
 use crate::{
-    poly::evals::EvaluationsList, utils::uninitialized_vec, whir::statement::constraint::Constraint,
+    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    utils::{eval_eq, uninitialized_vec},
+    whir::statement::constraint::Constraint,
 };
 
 pub mod constraint;
@@ -67,13 +68,13 @@ impl<F: Field> Statement<F> {
     ///
     /// **Precondition:**
     /// The number of variables in `w(X)` must match `self.num_variables`.
-    pub fn add_constraint(&mut self, weights: Weights<F>, sum: F) {
+    pub fn add_constraint(&mut self, weights: MultilinearPoint<F>, sum: F) {
         assert_eq!(weights.num_variables(), self.num_variables());
         self.constraints.push(Constraint { weights, sum });
     }
 
     /// Inserts a constraint `(w(X), s)` at the front of the system.
-    pub fn add_constraint_in_front(&mut self, weights: Weights<F>, sum: F) {
+    pub fn add_constraint_in_front(&mut self, weights: MultilinearPoint<F>, sum: F) {
         assert_eq!(weights.num_variables(), self.num_variables());
         self.constraints.insert(0, Constraint { weights, sum });
     }
@@ -81,7 +82,7 @@ impl<F: Field> Statement<F> {
     /// Inserts multiple constraints at the front of the system.
     ///
     /// Panics if any constraint's number of variables does not match the system.
-    pub fn add_constraints_in_front(&mut self, constraints: Vec<(Weights<F>, F)>) {
+    pub fn add_constraints_in_front(&mut self, constraints: Vec<(MultilinearPoint<F>, F)>) {
         // Store the number of variables expected by this statement.
         let n = self.num_variables();
 
@@ -140,13 +141,17 @@ impl<F: Field> Statement<F> {
             |(mut acc_sum, gamma_pow), (i, constraint)| {
                 if i == 0 {
                     // first iteration: combined_evals must be overwritten
-                    constraint
-                        .weights
-                        .accumulate::<Base, false>(&mut combined_evals, gamma_pow);
+                    eval_eq::<Base, F, false>(
+                        &constraint.weights,
+                        combined_evals.evals_mut(),
+                        gamma_pow,
+                    );
                 } else {
-                    constraint
-                        .weights
-                        .accumulate::<Base, true>(&mut combined_evals, gamma_pow);
+                    eval_eq::<Base, F, true>(
+                        &constraint.weights,
+                        combined_evals.evals_mut(),
+                        gamma_pow,
+                    );
                 }
                 acc_sum += constraint.sum * gamma_pow;
                 (acc_sum, gamma_pow * challenge)

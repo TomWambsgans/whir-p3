@@ -7,10 +7,8 @@ use p3_symmetric::Hash;
 use crate::{
     PF,
     fiat_shamir::{errors::ProofResult, verifier::VerifierState},
-    whir::{
-        parameters::WhirConfig,
-        statement::{constraint::Constraint, weights::Weights},
-    },
+    poly::multilinear::MultilinearPoint,
+    whir::{parameters::WhirConfig, statement::constraint::Constraint},
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -110,7 +108,7 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
             .iter()
             .zip(&self.ood_answers)
             .map(|(&point, &eval)| Constraint {
-                weights: Weights::univariate(point, self.num_variables),
+                weights: MultilinearPoint::expand_from_univariate(point, self.num_variables),
                 sum: eval,
             })
             .collect()

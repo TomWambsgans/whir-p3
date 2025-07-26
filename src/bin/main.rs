@@ -20,7 +20,7 @@ use whir_p3::{
         committer::{reader::CommitmentReader, writer::CommitmentWriter},
         parameters::WhirConfig,
         prover::Prover,
-        statement::{Statement, weights::Weights},
+        statement::Statement,
         verifier::Verifier,
     },
 };
@@ -148,8 +148,7 @@ fn main() {
     // Add constraints for each sampled point (equality constraints)
     for point in &points {
         let eval = polynomial.evaluate(point);
-        let weights = Weights::evaluation(point.clone());
-        statement.add_constraint(weights, eval);
+        statement.add_constraint(point.clone(), eval);
     }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
