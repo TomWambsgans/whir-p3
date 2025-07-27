@@ -101,8 +101,12 @@ fn main() {
     let polynomial_b = EvaluationsList::<F>::new((0..num_coeffs_b).map(|_| rng.random()).collect());
 
     // Sample `num_points` random multilinear points in the Boolean hypercube
-    let points_a = vec![MultilinearPoint::rand(&mut rng, num_variables_a)];
-    let points_b = vec![MultilinearPoint::rand(&mut rng, num_variables_b)];
+    let points_a = (0..3)
+        .map(|_| MultilinearPoint::rand(&mut rng, num_variables_a))
+        .collect::<Vec<_>>();
+    let points_b = (0..2)
+        .map(|_| MultilinearPoint::rand(&mut rng, num_variables_b))
+        .collect::<Vec<_>>();
 
     // Construct a new statement with the correct number of variables
     let mut statement_a = Statement::<EF>::new(num_variables_a);
