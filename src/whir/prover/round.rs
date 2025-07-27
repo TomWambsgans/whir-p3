@@ -45,9 +45,9 @@ where
 
     /// Merkle commitment prover data for the **base field** polynomial from the first round.
     /// This is used to open values at queried locations.
-    pub(crate) commitment_merkle_prover_data: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
+    pub(crate) commitment_merkle_prover_data_a: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
 
-    pub(crate) commitment_merkle_prover_data_b: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
+    pub(crate) commitment_merkle_prover_data_b: Option<RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>>,
 
     /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
     /// Present only after the first round.
@@ -73,6 +73,65 @@ where
 {
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
+        prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        mut statement: Statement<EF>,
+        witness: Witness<EF, F, DIGEST_ELEMS>,
+    ) -> ProofResult<Self>
+    where
+        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
+    {
+        // Convert witness ood_points into constraints
+        let new_constraints = witness
+            .ood_points
+            .into_iter()
+            .zip(witness.ood_answers)
+            .map(|(point, evaluation)| {
+                let weights = MultilinearPoint::expand_from_univariate(
+                    point,
+                    prover.mv_parameters.num_variables,
+                );
+                (weights, evaluation)
+            })
+            .collect();
+
+        statement.add_constraints_in_front(new_constraints);
+
+        let combination_randomness_gen: EF = prover_state.sample();
+
+        let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
+            &witness.polynomial,
+            &statement,
+            combination_randomness_gen,
+            prover_state,
+            prover.folding_factor.at_round(0),
+            prover.starting_folding_pow_bits,
+        );
+
+        let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
+            let mut randomness_vec = Vec::with_capacity(prover.mv_parameters.num_variables);
+            randomness_vec.extend(folding_randomness.iter().rev().copied());
+            randomness_vec.resize(prover.mv_parameters.num_variables, EF::ZERO);
+            randomness_vec
+        });
+
+        Ok(Self {
+            domain_size: prover.starting_domain_size(),
+            next_domain_gen: F::two_adic_generator(
+                prover.starting_domain_size().ilog2() as usize - prover.folding_factor.at_round(0),
+            ),
+            sumcheck_prover,
+            folding_randomness,
+            merkle_prover_data: None,
+            commitment_merkle_prover_data_a: witness.prover_data,
+            commitment_merkle_prover_data_b: None,
+            randomness_vec,
+            statement,
+        })
+    }
+
+    #[instrument(skip_all)]
+    pub(crate) fn initialize_first_round_state_batch<MyChallenger, C, Challenger>(
         prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
@@ -155,8 +214,8 @@ where
             sumcheck_prover,
             folding_randomness,
             merkle_prover_data: None,
-            commitment_merkle_prover_data: witness_a.prover_data,
-            commitment_merkle_prover_data_b: witness_b.prover_data,
+            commitment_merkle_prover_data_a: witness_a.prover_data,
+            commitment_merkle_prover_data_b: Some(witness_b.prover_data),
             randomness_vec,
             statement,
         })

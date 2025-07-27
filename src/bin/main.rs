@@ -7,8 +7,8 @@ use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
-use tracing_forest::{util::LevelFilter, ForestLayer};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
+use tracing_forest::{ForestLayer, util::LevelFilter};
+use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::{
     dft::EvalsDft,
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
@@ -144,7 +144,7 @@ fn main() {
     // Generate a proof for the given statement and witness
     let time = Instant::now();
     Prover(&params_a)
-        .prove(
+        .batch_prove(
             &dft,
             &mut prover_state,
             statement_a.clone(),
@@ -168,7 +168,7 @@ fn main() {
 
     let verif_time = Instant::now();
     Verifier::new(&params_a)
-        .verify(
+        .batch_verify(
             &mut verifier_state,
             &parsed_commitment_a,
             &statement_a,

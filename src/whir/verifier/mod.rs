@@ -54,7 +54,7 @@ where
 
     #[instrument(skip_all)]
     #[allow(clippy::too_many_lines)]
-    pub fn verify<const DIGEST_ELEMS: usize>(
+    pub fn batch_verify<const DIGEST_ELEMS: usize>(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -180,6 +180,143 @@ where
             verifier_state,
             &self.final_round_config(),
             prev_commitment.as_ref().unwrap(),
+            round_folding_randomness.last().unwrap(),
+            self.n_rounds(),
+        )?;
+
+        // Verify stir constraints directly on final polynomial
+        stir_constraints
+            .iter()
+            .all(|c| c.verify(&final_evaluations))
+            .then_some(())
+            .ok_or(ProofError::InvalidProof)?;
+
+        let final_sumcheck_randomness = verify_sumcheck_rounds::<EF, F, _>(
+            verifier_state,
+            &mut claimed_sum,
+            self.final_sumcheck_rounds,
+            self.final_folding_pow_bits,
+        )?;
+        round_folding_randomness.push(final_sumcheck_randomness.clone());
+
+        // Compute folding randomness across all rounds.
+        let folding_randomness = MultilinearPoint(
+            round_folding_randomness
+                .into_iter()
+                .rev()
+                .flat_map(|poly| poly.0.into_iter())
+                .collect(),
+        );
+
+        let evaluation_of_weights =
+            self.eval_constraints_poly(&round_constraints, folding_randomness.clone());
+
+        // Check the final sumcheck evaluation
+        let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
+        if claimed_sum != evaluation_of_weights * final_value {
+            return Err(ProofError::InvalidProof);
+        }
+
+        Ok(folding_randomness)
+    }
+
+    #[instrument(skip_all)]
+    #[allow(clippy::too_many_lines)]
+    pub fn verify<const DIGEST_ELEMS: usize>(
+        &self,
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        statement: &Statement<EF>,
+    ) -> ProofResult<MultilinearPoint<EF>>
+    where
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+    {
+        // During the rounds we collect constraints, combination randomness, folding randomness
+        // and we update the claimed sum of constraint evaluation.
+        let mut round_constraints = Vec::new();
+        let mut round_folding_randomness = Vec::new();
+        let mut claimed_sum = EF::ZERO;
+        let mut prev_commitment = parsed_commitment.clone();
+
+        // Combine OODS and statement constraints to claimed_sum
+        let constraints: Vec<_> = prev_commitment
+            .oods_constraints()
+            .into_iter()
+            .chain(statement.constraints.iter().cloned())
+            .collect();
+        let combination_randomness =
+            self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+        round_constraints.push((combination_randomness, constraints));
+
+        // Initial sumcheck
+        let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+            verifier_state,
+            &mut claimed_sum,
+            self.folding_factor.at_round(0),
+            self.starting_folding_pow_bits,
+        )?;
+        round_folding_randomness.push(folding_randomness);
+
+        for round_index in 0..self.n_rounds() {
+            // Fetch round parameters from config
+            let round_params = &self.round_parameters[round_index];
+
+            // Receive commitment to the folded polynomial (likely encoded at higher expansion)
+            let new_commitment = ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
+                verifier_state,
+                round_params.num_variables,
+                round_params.ood_samples,
+            )?;
+
+            // Verify in-domain challenges on the previous commitment.
+            let stir_constraints = self.verify_stir_challenges(
+                verifier_state,
+                round_params,
+                &prev_commitment,
+                round_folding_randomness.last().unwrap(),
+                round_index,
+            )?;
+
+            // Add out-of-domain and in-domain constraints to claimed_sum
+            let constraints: Vec<Constraint<EF>> = new_commitment
+                .oods_constraints()
+                .into_iter()
+                .chain(stir_constraints.into_iter())
+                .collect();
+
+            let combination_randomness =
+                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+            round_constraints.push((combination_randomness.clone(), constraints));
+
+            let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+                verifier_state,
+                &mut claimed_sum,
+                self.folding_factor.at_round(round_index + 1),
+                round_params.folding_pow_bits,
+            )?;
+
+            round_folding_randomness.push(folding_randomness);
+
+            // Update round parameters
+            prev_commitment = new_commitment;
+        }
+
+        // In the final round we receive the full polynomial instead of a commitment.
+        let n_final_coeffs = 1 << self.n_vars_of_final_polynomial();
+        let final_coefficients = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
+        let final_evaluations = EvaluationsList::new(final_coefficients);
+
+        // Verify in-domain challenges on the previous commitment.
+        let stir_constraints = self.verify_stir_challenges(
+            verifier_state,
+            &self.final_round_config(),
+            &prev_commitment,
             round_folding_randomness.last().unwrap(),
             self.n_rounds(),
         )?;
@@ -448,7 +585,11 @@ where
                 let eval_b = EvaluationsList::new(answer_b)
                     .evaluate(&MultilinearPoint(folding_randomness[..vars_b].to_vec()));
                 eval_a * folding_randomness[folding_randomness.len() - 1]
-                    + eval_b * folding_randomness[vars_b..].iter().map(|&x| EF::ONE - x).product::<EF>()
+                    + eval_b
+                        * folding_randomness[vars_b..]
+                            .iter()
+                            .map(|&x| EF::ONE - x)
+                            .product::<EF>()
             })
             .collect();
 

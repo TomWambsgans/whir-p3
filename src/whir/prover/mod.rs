@@ -115,6 +115,51 @@ where
         &self,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        statement: Statement<EF>,
+        witness: Witness<EF, F, DIGEST_ELEMS>,
+    ) -> ProofResult<MultilinearPoint<EF>>
+    where
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<F>: TwoAdicField,
+    {
+        // Validate parameters
+        assert!(
+            self.validate_parameters()
+                && self.validate_statement(&statement)
+                && self.validate_witness(&witness),
+            "Invalid prover parameters, statement, or witness"
+        );
+
+        // Initialize the round state with inputs and initial polynomial data
+        let mut round_state =
+            RoundState::initialize_first_round_state(self, prover_state, statement, witness)?;
+
+        // Run the WHIR protocol round-by-round
+        for round in 0..=self.n_rounds() {
+            self.round(round, dft, prover_state, &mut round_state)?;
+        }
+
+        // Reverse the vector of verifier challenges (used as evaluation point)
+        //
+        // These challenges were pushed in round order; we reverse them to use as a single
+        // evaluation point for final statement consistency checks.
+        round_state.randomness_vec.reverse();
+        let constraint_eval = MultilinearPoint(round_state.randomness_vec);
+
+        Ok(constraint_eval)
+    }
+
+    #[instrument(skip_all)]
+    pub fn batch_prove<const DIGEST_ELEMS: usize>(
+        &self,
+        dft: &EvalsDft<PF<F>>,
+        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
         witness_a: Witness<EF, F, DIGEST_ELEMS>,
         statement_b: Statement<EF>,
@@ -139,7 +184,7 @@ where
         );
         assert!(witness_a.polynomial.num_variables() >= witness_b.polynomial.num_variables());
         // Initialize the round state with inputs and initial polynomial data
-        let mut round_state = RoundState::initialize_first_round_state(
+        let mut round_state = RoundState::initialize_first_round_state_batch(
             self,
             prover_state,
             statement_a,
@@ -267,23 +312,75 @@ where
         // Collect Merkle proofs for stir queries
         let stir_evaluations = match &round_state.merkle_prover_data {
             None => {
-                let mut answers_a = Vec::<Vec<F>>::new();
-                let mut answers_b = Vec::<Vec<F>>::new();
+                if round_state.commitment_merkle_prover_data_b.is_some() {
+                    let mut answers_a = Vec::<Vec<F>>::new();
+                    let mut answers_b = Vec::<Vec<F>>::new();
 
-                for (answers, commitment_merkle_prover_data) in [
-                    (&mut answers_a, &round_state.commitment_merkle_prover_data),
-                    (&mut answers_b, &round_state.commitment_merkle_prover_data_b),
-                ] {
-                    let mut merkle_proofs = Vec::new();
+                    for (answers, commitment_merkle_prover_data) in [
+                        (&mut answers_a, &round_state.commitment_merkle_prover_data_a),
+                        (
+                            &mut answers_b,
+                            round_state
+                                .commitment_merkle_prover_data_b
+                                .as_ref()
+                                .unwrap(),
+                        ),
+                    ] {
+                        let mut merkle_proofs = Vec::new();
+                        for challenge in &stir_challenges_indexes {
+                            let commitment = extension_mmcs_f
+                                .open_batch(*challenge, commitment_merkle_prover_data);
+                            answers.push(commitment.opened_values[0].clone());
+                            merkle_proofs.push(commitment.opening_proof);
+                        }
+
+                        // merkle leaves
+                        for answer in answers {
+                            prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
+                        }
+
+                        // merkle authentication proof
+                        for merkle_proof in &merkle_proofs {
+                            for digest in merkle_proof {
+                                prover_state.hint_base_scalars(digest);
+                            }
+                        }
+                    }
+
+                    let mut stir_evaluations = Vec::new();
+                    for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
+                        let a_trunc = round_state.folding_randomness
+                            [..round_state.folding_randomness.len() - 1]
+                            .to_vec();
+                        let vars_b = answer_b.len().ilog2() as usize;
+                        let eval_a = EvaluationsList::new(answer_a.clone())
+                            .evaluate(&MultilinearPoint(a_trunc));
+                        let b_trunc = round_state.folding_randomness[..vars_b].to_vec();
+                        let eval_b = EvaluationsList::new(answer_b.clone())
+                            .evaluate(&MultilinearPoint(b_trunc));
+                        let last_fold_rand_a = round_state.folding_randomness
+                            [round_state.folding_randomness.len() - 1];
+                        let last_fold_rand_b = round_state.folding_randomness[vars_b..]
+                            .iter()
+                            .map(|&x| EF::ONE - x)
+                            .product::<EF>();
+                        stir_evaluations
+                            .push(eval_a * last_fold_rand_a + eval_b * last_fold_rand_b);
+                    }
+
+                    stir_evaluations
+                } else {
+                    let mut answers = Vec::<Vec<F>>::with_capacity(stir_challenges_indexes.len());
+                    let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                     for challenge in &stir_challenges_indexes {
-                        let commitment =
-                            extension_mmcs_f.open_batch(*challenge, commitment_merkle_prover_data);
+                        let commitment = extension_mmcs_f
+                            .open_batch(*challenge, &round_state.commitment_merkle_prover_data_a);
                         answers.push(commitment.opened_values[0].clone());
                         merkle_proofs.push(commitment.opening_proof);
                     }
 
                     // merkle leaves
-                    for answer in answers {
+                    for answer in &answers {
                         prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
                     }
 
@@ -293,31 +390,20 @@ where
                             prover_state.hint_base_scalars(digest);
                         }
                     }
-                }
 
-                let mut stir_evaluations = Vec::new();
-                for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
-                    let a_trunc = round_state.folding_randomness
-                        [..round_state.folding_randomness.len() - 1]
-                        .to_vec();
-                    let vars_b = answer_b.len().ilog2() as usize;
-                    let eval_a =
-                        EvaluationsList::new(answer_a.clone()).evaluate(&MultilinearPoint(a_trunc));
-                    let b_trunc = round_state.folding_randomness[..vars_b].to_vec();
-                    let eval_b =
-                        EvaluationsList::new(answer_b.clone()).evaluate(&MultilinearPoint(b_trunc));
-                    let last_fold_rand_a =
-                        round_state.folding_randomness[round_state.folding_randomness.len() - 1];
-                    let last_fold_rand_b = round_state.folding_randomness[vars_b..]
-                        .iter()
-                        .map(|&x| EF::ONE - x)
-                        .product::<EF>();
+                    // Evaluate answers in the folding randomness.
+                    let mut stir_evaluations = Vec::with_capacity(answers.len());
+                    for answer in &answers {
+                        stir_evaluations.push(
+                            EvaluationsList::new(answer.clone())
+                                .evaluate(&round_state.folding_randomness),
+                        );
+                    }
+
                     stir_evaluations
-                        .push(eval_a * last_fold_rand_a + eval_b * last_fold_rand_b);
                 }
-
-                stir_evaluations
             }
+
             Some(data) => {
                 let mut answers = Vec::with_capacity(stir_challenges_indexes.len());
                 let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
@@ -461,7 +547,7 @@ where
 
                 for challenge in final_challenge_indexes {
                     let commitment =
-                        mmcs.open_batch(challenge, &round_state.commitment_merkle_prover_data);
+                        mmcs.open_batch(challenge, &round_state.commitment_merkle_prover_data_a);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
                 }

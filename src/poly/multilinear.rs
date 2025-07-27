@@ -205,7 +205,6 @@ impl<F> From<F> for MultilinearPoint<F> {
     }
 }
 
-
 impl<F> MultilinearPoint<F>
 where
     StandardUniform: Distribution<F>,
