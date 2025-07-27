@@ -79,7 +79,6 @@ pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
 /// ## Mathematical Formula
 /// The compression is achieved by applying the following formula to pairs of evaluations:
 /// $p'(X_2, ..., X_n) = (p(1, X_2, ..., X_n) - p(0, X_2, ..., X_n)) \cdot r + p(0, X_2, ..., X_n)$
-#[instrument(skip_all)]
 pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
     // Ensure the polynomial is not a constant (i.e., has variables to fold).
     assert_ne!(evals.num_variables(), 0);

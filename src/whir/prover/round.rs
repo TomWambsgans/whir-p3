@@ -1,12 +1,13 @@
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, TwoAdicField};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
     PF,
     fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
-    poly::multilinear::MultilinearPoint,
+    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     sumcheck::sumcheck_single::SumcheckSingle,
     whir::{
         committer::{RoundMerkleTree, Witness},
@@ -46,6 +47,8 @@ where
     /// This is used to open values at queried locations.
     pub(crate) commitment_merkle_prover_data: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
 
+    pub(crate) commitment_merkle_prover_data_b: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
+
     /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
     /// Present only after the first round.
     pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<F>, EF, DIGEST_ELEMS>>,
@@ -68,59 +71,72 @@ where
     F: ExtensionField<PF<F>>,
     EF: ExtensionField<PF<F>>,
 {
-    /// Initializes the prover’s state for the first round of the WHIR protocol.
-    ///
-    /// This function prepares all round-local state needed to begin the interactive proof:
-    /// - If the WHIR protocol has an initial statement, it runs the first sumcheck round and
-    ///   samples folding randomness using Fiat-Shamir.
-    /// - Otherwise, it directly absorbs verifier-supplied randomness for folding.
-    /// - It incorporates any out-of-domain (OOD) constraints derived from the witness,
-    ///   and prepares the polynomial coefficients accordingly.
-    ///
-    /// Returns a fully-formed `RoundState` containing:
-    /// - The active domain,
-    /// - The initial polynomial (as coefficients),
-    /// - The first sumcheck prover (if applicable),
-    /// - The sampled folding randomness,
-    /// - Constraint tracking data,
-    /// - Merkle tree commitment data.
-    ///
-    /// This function should be called once at the beginning of the proof, before entering the
-    /// main WHIR folding loop.
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
         prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        mut statement: Statement<EF>,
-        witness: Witness<EF, F, DIGEST_ELEMS>,
+        statement_a: Statement<EF>,
+        witness_a: Witness<EF, F, DIGEST_ELEMS>,
+        statement_b: Statement<EF>,
+        witness_b: Witness<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<Self>
     where
         Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
     {
-        // Convert witness ood_points into constraints
-        let new_constraints = witness
-            .ood_points
-            .into_iter()
-            .zip(witness.ood_answers)
-            .map(|(point, evaluation)| {
-                let weights = MultilinearPoint::expand_from_univariate(
-                    point,
-                    prover.mv_parameters.num_variables,
-                );
-                (weights, evaluation)
-            })
-            .collect();
+        let n_vars_a = statement_a.num_variables();
+        let n_vars_b = statement_b.num_variables();
 
-        statement.add_constraints_in_front(new_constraints);
+        let mut statement = Statement::new(statement_a.num_variables() + 1);
+
+        for (point, evaluation) in witness_a.ood_points.into_iter().zip(witness_a.ood_answers) {
+            let mut point = MultilinearPoint::expand_from_univariate(point, n_vars_a);
+            point.push(EF::ONE);
+            statement.add_constraint(point, evaluation);
+        }
+        for mut constraint in statement_a.constraints {
+            constraint.weights.push(EF::ONE);
+            statement.add_constraint(constraint.weights, constraint.sum);
+        }
+        for (point, evaluation) in witness_b.ood_points.into_iter().zip(witness_b.ood_answers) {
+            let mut point = MultilinearPoint::expand_from_univariate(point, n_vars_b);
+            point.extend(vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
+            statement.add_constraint(point, evaluation);
+        }
+        for mut constraint in statement_b.constraints {
+            constraint
+                .weights
+                .extend(vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
+            statement.add_constraint(constraint.weights, constraint.sum);
+        }
 
         let combination_randomness_gen: EF = prover_state.sample();
 
+        let _span = info_span!("merging 2 batched polynomials", n_vars_a, n_vars_b,).entered();
+        let mut polynomial = F::zero_vec(witness_a.polynomial.num_evals() * 2);
+        polynomial
+            .par_iter_mut()
+            .step_by(1 << (1 + n_vars_a - n_vars_b))
+            .enumerate()
+            .for_each(|(i, eval)| {
+                *eval = witness_b.polynomial.evals()[i];
+            });
+        polynomial[1..]
+            .par_iter_mut()
+            .step_by(2)
+            .enumerate()
+            .for_each(|(i, eval)| {
+                *eval = witness_a.polynomial.evals()[i];
+            });
+        std::mem::drop(_span);
+
+        let polynomial = EvaluationsList::new(polynomial);
+
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
-            &witness.polynomial,
+            &polynomial,
             &statement,
             combination_randomness_gen,
             prover_state,
-            prover.folding_factor.at_round(0),
+            prover.folding_factor.at_round(0) + 1,
             prover.starting_folding_pow_bits,
         );
 
@@ -139,7 +155,8 @@ where
             sumcheck_prover,
             folding_randomness,
             merkle_prover_data: None,
-            commitment_merkle_prover_data: witness.prover_data,
+            commitment_merkle_prover_data: witness_a.prover_data,
+            commitment_merkle_prover_data_b: witness_b.prover_data,
             randomness_vec,
             statement,
         })

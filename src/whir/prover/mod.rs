@@ -6,6 +6,7 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
+use rand::distr::{Distribution, StandardUniform};
 use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
@@ -109,35 +110,15 @@ where
         witness.polynomial.num_variables() == self.mv_parameters.num_variables
     }
 
-    /// Executes the full WHIR prover protocol to produce the proof.
-    ///
-    /// This function takes the public statement and private witness, performs the
-    /// multi-round sumcheck-based polynomial folding protocol using DFTs, and returns
-    /// a proof that the witness satisfies the statement.
-    ///
-    /// The proof includes:
-    /// - Merkle authentication paths for each round's polynomial commitments
-    /// - Final evaluations of the public linear statement constraints at a random point
-    ///
-    /// # Parameters
-    /// - `dft`: A DFT backend used for evaluations
-    /// - `prover_state`: Mutable prover state used across rounds (transcript, randomness, etc.)
-    /// - `statement`: The public input, consisting of linear or nonlinear constraints
-    /// - `witness`: The private witness satisfying the constraints, including committed values
-    ///
-    /// # Returns
-    /// - The final random evaluation point used to evaluate deferred constraints
-    /// - The list of evaluations of all deferred constraints at that point
-    ///
-    /// # Errors
-    /// Returns an error if the witness or statement are invalid, or if a round fails.
     #[instrument(skip_all)]
     pub fn prove<const DIGEST_ELEMS: usize>(
         &self,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        statement: Statement<EF>,
-        witness: Witness<EF, F, DIGEST_ELEMS>,
+        statement_a: Statement<EF>,
+        witness_a: Witness<EF, F, DIGEST_ELEMS>,
+        statement_b: Statement<EF>,
+        witness_b: Witness<EF, F, DIGEST_ELEMS>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -148,18 +129,24 @@ where
             + Sync,
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<F>: TwoAdicField,
+        StandardUniform: Distribution<EF>,
     {
-        // Validate parameters
-        assert!(
-            self.validate_parameters()
-                && self.validate_statement(&statement)
-                && self.validate_witness(&witness),
-            "Invalid prover parameters, statement, or witness"
-        );
+        // X PolA + (1 - X) PolB
 
+        assert_eq!(
+            witness_a.polynomial.num_variables(),
+            self.mv_parameters.num_variables,
+        );
+        assert!(witness_a.polynomial.num_variables() >= witness_b.polynomial.num_variables());
         // Initialize the round state with inputs and initial polynomial data
-        let mut round_state =
-            RoundState::initialize_first_round_state(self, prover_state, statement, witness)?;
+        let mut round_state = RoundState::initialize_first_round_state(
+            self,
+            prover_state,
+            statement_a,
+            witness_a,
+            statement_b,
+            witness_b,
+        )?;
 
         // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
@@ -280,34 +267,53 @@ where
         // Collect Merkle proofs for stir queries
         let stir_evaluations = match &round_state.merkle_prover_data {
             None => {
-                let mut answers = Vec::<Vec<F>>::with_capacity(stir_challenges_indexes.len());
-                let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
-                for challenge in &stir_challenges_indexes {
-                    let commitment = extension_mmcs_f
-                        .open_batch(*challenge, &round_state.commitment_merkle_prover_data);
-                    answers.push(commitment.opened_values[0].clone());
-                    merkle_proofs.push(commitment.opening_proof);
-                }
+                let mut answers_a = Vec::<Vec<F>>::new();
+                let mut answers_b = Vec::<Vec<F>>::new();
 
-                // merkle leaves
-                for answer in &answers {
-                    prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
-                }
+                for (answers, commitment_merkle_prover_data) in [
+                    (&mut answers_a, &round_state.commitment_merkle_prover_data),
+                    (&mut answers_b, &round_state.commitment_merkle_prover_data_b),
+                ] {
+                    let mut merkle_proofs = Vec::new();
+                    for challenge in &stir_challenges_indexes {
+                        let commitment =
+                            extension_mmcs_f.open_batch(*challenge, commitment_merkle_prover_data);
+                        answers.push(commitment.opened_values[0].clone());
+                        merkle_proofs.push(commitment.opening_proof);
+                    }
 
-                // merkle authentication proof
-                for merkle_proof in &merkle_proofs {
-                    for digest in merkle_proof {
-                        prover_state.hint_base_scalars(digest);
+                    // merkle leaves
+                    for answer in answers {
+                        prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
+                    }
+
+                    // merkle authentication proof
+                    for merkle_proof in &merkle_proofs {
+                        for digest in merkle_proof {
+                            prover_state.hint_base_scalars(digest);
+                        }
                     }
                 }
 
-                // Evaluate answers in the folding randomness.
-                let mut stir_evaluations = Vec::with_capacity(answers.len());
-                for answer in &answers {
-                    stir_evaluations.push(
-                        EvaluationsList::new(answer.clone())
-                            .evaluate(&round_state.folding_randomness),
-                    );
+                let mut stir_evaluations = Vec::new();
+                for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
+                    let a_trunc = round_state.folding_randomness
+                        [..round_state.folding_randomness.len() - 1]
+                        .to_vec();
+                    let vars_b = answer_b.len().ilog2() as usize;
+                    let eval_a =
+                        EvaluationsList::new(answer_a.clone()).evaluate(&MultilinearPoint(a_trunc));
+                    let b_trunc = round_state.folding_randomness[..vars_b].to_vec();
+                    let eval_b =
+                        EvaluationsList::new(answer_b.clone()).evaluate(&MultilinearPoint(b_trunc));
+                    let last_fold_rand_a =
+                        round_state.folding_randomness[round_state.folding_randomness.len() - 1];
+                    let last_fold_rand_b = round_state.folding_randomness[vars_b..]
+                        .iter()
+                        .map(|&x| EF::ONE - x)
+                        .product::<EF>();
+                    stir_evaluations
+                        .push(eval_a * last_fold_rand_a + eval_b * last_fold_rand_b);
                 }
 
                 stir_evaluations

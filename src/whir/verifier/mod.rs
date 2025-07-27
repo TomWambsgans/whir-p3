@@ -57,8 +57,10 @@ where
     pub fn verify<const DIGEST_ELEMS: usize>(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
-        parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        statement: &Statement<EF>,
+        parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        statement_a: &Statement<EF>,
+        parsed_commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        statement_b: &Statement<EF>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -74,14 +76,32 @@ where
         let mut round_constraints = Vec::new();
         let mut round_folding_randomness = Vec::new();
         let mut claimed_sum = EF::ZERO;
-        let mut prev_commitment = parsed_commitment.clone();
+        let mut prev_commitment = None;
 
         // Combine OODS and statement constraints to claimed_sum
-        let constraints: Vec<_> = prev_commitment
+        let mut constraints: Vec<_> = parsed_commitment_a
             .oods_constraints()
             .into_iter()
-            .chain(statement.constraints.iter().cloned())
+            .chain(statement_a.constraints.iter().cloned())
+            .map(|mut c| {
+                c.weights.push(EF::ONE);
+                c
+            })
             .collect();
+
+        constraints.extend(
+            parsed_commitment_b
+                .oods_constraints()
+                .into_iter()
+                .chain(statement_b.constraints.iter().cloned())
+                .map(|mut c| {
+                    let ending_zeros =
+                        parsed_commitment_a.num_variables + 1 - parsed_commitment_b.num_variables;
+                    c.weights.extend(vec![EF::ZERO; ending_zeros]);
+                    c
+                }),
+        );
+
         let combination_randomness =
             self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
         round_constraints.push((combination_randomness, constraints));
@@ -90,7 +110,7 @@ where
         let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
             verifier_state,
             &mut claimed_sum,
-            self.folding_factor.at_round(0),
+            self.folding_factor.at_round(0) + 1,
             self.starting_folding_pow_bits,
         )?;
         round_folding_randomness.push(folding_randomness);
@@ -107,13 +127,24 @@ where
             )?;
 
             // Verify in-domain challenges on the previous commitment.
-            let stir_constraints = self.verify_stir_challenges(
-                verifier_state,
-                round_params,
-                &prev_commitment,
-                round_folding_randomness.last().unwrap(),
-                round_index,
-            )?;
+            let stir_constraints = if round_index == 0 {
+                self.verify_stir_challenges_batched(
+                    verifier_state,
+                    round_params,
+                    &parsed_commitment_a,
+                    &parsed_commitment_b,
+                    round_folding_randomness.last().unwrap(),
+                    round_index,
+                )?
+            } else {
+                self.verify_stir_challenges(
+                    verifier_state,
+                    round_params,
+                    prev_commitment.as_ref().unwrap(),
+                    round_folding_randomness.last().unwrap(),
+                    round_index,
+                )?
+            };
 
             // Add out-of-domain and in-domain constraints to claimed_sum
             let constraints: Vec<Constraint<EF>> = new_commitment
@@ -136,7 +167,7 @@ where
             round_folding_randomness.push(folding_randomness);
 
             // Update round parameters
-            prev_commitment = new_commitment;
+            prev_commitment = Some(new_commitment);
         }
 
         // In the final round we receive the full polynomial instead of a commitment.
@@ -148,7 +179,7 @@ where
         let stir_constraints = self.verify_stir_challenges(
             verifier_state,
             &self.final_round_config(),
-            &prev_commitment,
+            prev_commitment.as_ref().unwrap(),
             round_folding_randomness.last().unwrap(),
             self.n_rounds(),
         )?;
@@ -304,12 +335,121 @@ where
             &dimensions,
             leafs_base_field,
             round_index,
+            0,
         )?;
 
         // Compute STIR Constraints
         let folds: Vec<_> = answers
             .into_iter()
             .map(|answers| EvaluationsList::new(answers).evaluate(folding_randomness))
+            .collect();
+
+        let stir_constraints = stir_challenges_indexes
+            .iter()
+            .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
+            .zip(&folds)
+            .map(|(point, &value)| Constraint {
+                weights: MultilinearPoint::expand_from_univariate(
+                    EF::from(point),
+                    params.num_variables,
+                ),
+                sum: value,
+            })
+            .collect();
+
+        Ok(stir_constraints)
+    }
+
+    pub fn verify_stir_challenges_batched<const DIGEST_ELEMS: usize>(
+        &self,
+        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        params: &RoundConfig<F>,
+        commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        folding_randomness: &MultilinearPoint<EF>,
+        round_index: usize,
+    ) -> ProofResult<Vec<Constraint<EF>>>
+    where
+        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+    {
+        let leafs_base_field = round_index == 0;
+
+        // CRITICAL: Verify the prover's proof-of-work before generating challenges.
+        //
+        // This is the verifier's counterpart to the prover's grinding step and is essential
+        // for protocol soundness.
+        //
+        // The query locations (`stir_challenges_indexes`) we are about to generate are derived
+        // from the transcript, which includes the prover's commitment for this round. To prevent
+        // a malicious prover from repeatedly trying different commitments until they find one that
+        // produces "easy" queries, the protocol forces the prover to perform an expensive
+        // proof-of-work (grinding) after they commit.
+        //
+        // By verifying that proof-of-work *now*, we confirm that the prover "locked in" their
+        // commitment at a significant computational cost. This gives us confidence that the
+        // challenges we generate are unpredictable and unbiased by a cheating prover.
+        verifier_state.check_pow_grinding(params.pow_bits)?;
+
+        let stir_challenges_indexes = get_challenge_stir_queries(
+            params.domain_size >> params.folding_factor,
+            params.num_queries,
+            verifier_state,
+        );
+
+        // dbg!(&stir_challenges_indexes);
+        // dbg!(verifier_state.challenger().state());
+
+        let dimensions_a = vec![Dimensions {
+            height: params.domain_size >> params.folding_factor,
+            width: 1 << params.folding_factor,
+        }];
+        let answers_a = self.verify_merkle_proof(
+            verifier_state,
+            &commitment_a.root,
+            &stir_challenges_indexes,
+            &dimensions_a,
+            leafs_base_field,
+            round_index,
+            0,
+        )?;
+
+        // WE ASSUME FOR SIMPLICITY THAT LOG_INV_RATE_A = LOG_INV_RATE_B
+        let vars_diff = commitment_a.num_variables - commitment_b.num_variables;
+        assert!(vars_diff < params.folding_factor);
+        let dimensions_b = vec![Dimensions {
+            height: params.domain_size >> params.folding_factor,
+            width: 1 << (params.folding_factor - vars_diff),
+        }];
+        let answers_b = self.verify_merkle_proof(
+            verifier_state,
+            &commitment_b.root,
+            &stir_challenges_indexes,
+            &dimensions_b,
+            leafs_base_field,
+            round_index,
+            vars_diff,
+        )?;
+
+        // Compute STIR Constraints
+        let folds: Vec<_> = answers_a
+            .into_iter()
+            .zip(answers_b)
+            .map(|(answer_a, answer_b)| {
+                let eval_a = EvaluationsList::new(answer_a).evaluate(&MultilinearPoint(
+                    folding_randomness[..folding_randomness.len() - 1].to_vec(),
+                ));
+                let vars_b = answer_b.len().ilog2() as usize;
+                let eval_b = EvaluationsList::new(answer_b)
+                    .evaluate(&MultilinearPoint(folding_randomness[..vars_b].to_vec()));
+                eval_a * folding_randomness[folding_randomness.len() - 1]
+                    + eval_b * folding_randomness[vars_b..].iter().map(|&x| EF::ONE - x).product::<EF>()
+            })
             .collect();
 
         let stir_constraints = stir_challenges_indexes
@@ -359,6 +499,7 @@ where
         dimensions: &[Dimensions],
         leafs_base_field: bool,
         round_index: usize,
+        var_shift: usize,
     ) -> ProofResult<Vec<Vec<EF>>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -380,7 +521,7 @@ where
         let res = if leafs_base_field {
             // Merkle leaves
             let mut answers = Vec::<Vec<F>>::new();
-            let merkle_leaf_size = 1 << self.folding_factor.at_round(round_index);
+            let merkle_leaf_size = 1 << (self.folding_factor.at_round(round_index) - var_shift);
             for _ in 0..indices.len() {
                 answers.push(pack_scalars_to_extension::<PF<F>, F>(
                     &verifier_state.receive_hint_base_scalars(
