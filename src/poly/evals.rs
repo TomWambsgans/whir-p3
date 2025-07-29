@@ -75,6 +75,11 @@ where
         &self.evals
     }
 
+    #[must_use]
+    pub fn into_evals(self) -> Vec<F> {
+        self.evals
+    }
+
     /// Returns a mutable reference to the evaluations vector.
     pub fn evals_mut(&mut self) -> &mut [F] {
         &mut self.evals
