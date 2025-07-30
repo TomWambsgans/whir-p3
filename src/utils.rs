@@ -3,7 +3,6 @@ use p3_field::{
     PrimeCharacteristicRing,
 };
 use p3_util::{iter_array_chunks_padded, log2_strict_usize};
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 /// Computes the equality polynomial evaluations efficiently.
@@ -30,10 +29,7 @@ pub(crate) fn eval_eq<F: Field, EF: ExtensionField<F>, const INITIALIZED: bool>(
     // Long term this should be a modifiable parameter.
     // I've chosen 32 here as my machine has 20 logical cores. Plausibly we might want to hard code this
     // to be a little larger than this.
-    #[cfg(feature = "parallel")]
     const LOG_NUM_THREADS: usize = 5;
-    #[cfg(not(feature = "parallel"))]
-    const LOG_NUM_THREADS: usize = 0;
 
     const NUM_THREADS: usize = 1 << LOG_NUM_THREADS;
 
@@ -95,21 +91,8 @@ pub(crate) fn eval_eq<F: Field, EF: ExtensionField<F>, const INITIALIZED: bool>(
         }
 
         // Finally do all computations involving the middle elements in parallel.
-        #[cfg(feature = "parallel")]
         out.par_chunks_exact_mut(out_chunk_size)
             .zip(parallel_buffer.par_iter())
-            .for_each(|(out_chunk, buffer_val)| {
-                eval_eq_packed::<_, _, INITIALIZED>(
-                    &eval[LOG_NUM_THREADS..(eval.len() - log_packing_width)],
-                    out_chunk,
-                    *buffer_val,
-                );
-            });
-
-        // Or not in parallel if the feature is unavailable.
-        #[cfg(not(feature = "parallel"))]
-        out.chunks_exact_mut(out_chunk_size)
-            .zip(parallel_buffer.iter())
             .for_each(|(out_chunk, buffer_val)| {
                 eval_eq_packed::<_, _, INITIALIZED>(
                     &eval[LOG_NUM_THREADS..(eval.len() - log_packing_width)],
@@ -550,7 +533,6 @@ fn packed_eq_poly<F: Field, EF: ExtensionField<F>>(
 }
 
 pub fn parallel_clone<A: Clone + Send + Sync>(src: &[A], dst: &mut [A]) {
-    #[cfg(feature = "parallel")]
     if src.len() < 1 << 15 {
         // sequential copy
         dst.clone_from_slice(src);
@@ -563,13 +545,9 @@ pub fn parallel_clone<A: Clone + Send + Sync>(src: &[A], dst: &mut [A]) {
                 d.clone_from_slice(s);
             });
     }
-
-    #[cfg(not(feature = "parallel"))]
-    dst.clone_from_slice(src);
 }
 
 pub fn parallel_repeat<A: Copy + Send + Sync>(src: &[A], n: usize) -> Vec<A> {
-    #[cfg(feature = "parallel")]
     if src.len() * n < 1 << 15 {
         // sequential repeat
         src.repeat(n)
@@ -584,9 +562,6 @@ pub fn parallel_repeat<A: Copy + Send + Sync>(src: &[A], n: usize) -> Vec<A> {
         });
         res
     }
-
-    #[cfg(not(feature = "parallel"))]
-    src.repeat(n)
 }
 
 /// Recursively computes a chunk of the scaled multilinear equality polynomial over the Boolean hypercube.
@@ -696,7 +671,6 @@ where
         let (low_chunk, high_chunk) = out.split_at_mut(mid_point);
 
         // Optional parallelism for deep recursion trees
-        #[cfg(feature = "parallel")]
         {
             const PARALLEL_THRESHOLD: usize = 10;
 

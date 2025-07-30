@@ -8,7 +8,7 @@ use crate::{
     PF,
     fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::sumcheck_single::SumcheckSingle,
+    sumcheck::SumcheckSingle,
     whir::{
         committer::{RoundMerkleTree, Witness},
         statement::Statement,

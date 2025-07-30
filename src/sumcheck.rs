@@ -1,19 +1,15 @@
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field, TwoAdicField};
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use tracing::instrument;
 
-use super::sumcheck_polynomial::SumcheckPolynomial;
 use crate::{
     PF,
     fiat_shamir::prover::ProverState,
     poly::{dense::WhirDensePolynomial, evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::utils::sumcheck_quadratic,
     whir::statement::Statement,
 };
 
-#[cfg(feature = "parallel")]
 const PARALLEL_THRESHOLD: usize = 4096;
 
 /// Folds a list of evaluations from a base field `F` into an extension field `EF`.
@@ -49,15 +45,12 @@ pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
     //
     // This was chosen based on experiments with the `compress` function.
     // It is possible that the threshold can be tuned further.
-    #[cfg(feature = "parallel")]
     let folded = if evals.evals().len() >= PARALLEL_THRESHOLD {
         evals.evals().par_chunks_exact(2).map(fold).collect()
     } else {
         evals.evals().chunks_exact(2).map(fold).collect()
     };
 
-    #[cfg(not(feature = "parallel"))]
-    let folded = evals.evals().chunks_exact(2).map(fold).collect();
     EvaluationsList::new(folded)
 }
 
@@ -85,50 +78,24 @@ pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
 
     // The sequential, in-place logic is used for the non-parallel build
     // and for smaller inputs in the parallel build.
-    #[cfg(not(feature = "parallel"))]
-    {
-        // Calculate the new length of the evaluations list after folding.
+    // For large inputs, we use the original parallel, out-of-place strategy for maximum speed.
+    if evals.evals().len() >= PARALLEL_THRESHOLD {
+        // Define the folding operation for a pair of elements.
+        let fold = |slice: &[F]| -> F { r * (slice[1] - slice[0]) + slice[0] };
+        // Execute the fold in parallel and collect into a new vector.
+        let folded = evals.evals().par_chunks_exact(2).map(fold).collect();
+        // Replace the old evaluations with the new, folded evaluations.
+        *evals = EvaluationsList::new(folded);
+    } else {
+        // For smaller inputs, we use the sequential, in-place strategy to save memory.
         let mid = evals.len() / 2;
-
-        // Get a mutable slice to the underlying vector of evaluations.
         let evals_slice = evals.evals_mut();
-
-        // Sequentially fold pairs of evaluations and write the result to the first half of the slice.
         for i in 0..mid {
-            // Read the pair of evaluations, p(..., 0) and p(..., 1), for the last variable.
             let p0 = evals_slice[2 * i];
             let p1 = evals_slice[2 * i + 1];
-
-            // Apply the folding formula and overwrite the entry at the current write position.
             evals_slice[i] = r * (p1 - p0) + p0;
         }
-
-        // Truncate the evaluations list to its new, smaller size.
         evals.truncate(mid);
-    }
-
-    // The parallel logic is only available when the "parallel" feature is enabled.
-    #[cfg(feature = "parallel")]
-    {
-        // For large inputs, we use the original parallel, out-of-place strategy for maximum speed.
-        if evals.evals().len() >= PARALLEL_THRESHOLD {
-            // Define the folding operation for a pair of elements.
-            let fold = |slice: &[F]| -> F { r * (slice[1] - slice[0]) + slice[0] };
-            // Execute the fold in parallel and collect into a new vector.
-            let folded = evals.evals().par_chunks_exact(2).map(fold).collect();
-            // Replace the old evaluations with the new, folded evaluations.
-            *evals = EvaluationsList::new(folded);
-        } else {
-            // For smaller inputs, we use the sequential, in-place strategy to save memory.
-            let mid = evals.len() / 2;
-            let evals_slice = evals.evals_mut();
-            for i in 0..mid {
-                let p0 = evals_slice[2 * i];
-                let p1 = evals_slice[2 * i + 1];
-                evals_slice[i] = r * (p1 - p0) + p0;
-            }
-            evals.truncate(mid);
-        }
     }
 }
 
@@ -162,17 +129,7 @@ where
 {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
-
-    let sumcheck_poly_normal = WhirDensePolynomial::lagrange_interpolation(
-        &sumcheck_poly
-            .evaluations()
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| (F::from_usize(i), v))
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
-    prover_state.add_extension_scalars(&sumcheck_poly_normal.coeffs);
+    prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
     // Sample verifier challenge.
     let r: EF = prover_state.sample();
@@ -180,16 +137,9 @@ where
     prover_state.pow_grinding(pow_bits);
 
     // Compress polynomials and update the sum.
-    #[cfg(feature = "parallel")]
     let evals = { rayon::join(|| compress(weights, r), || compress_ext(evals, r)).1 };
 
-    #[cfg(not(feature = "parallel"))]
-    let evals = {
-        compress(weights, r);
-        compress_ext(evals, r)
-    };
-
-    *sum = sumcheck_poly.evaluate_at_point(&r.into());
+    *sum = sumcheck_poly.evaluate(r);
 
     (r, evals)
 }
@@ -222,16 +172,7 @@ where
 {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
-    let sumcheck_poly_normal = WhirDensePolynomial::lagrange_interpolation(
-        &sumcheck_poly
-            .evaluations()
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| (F::from_usize(i), v))
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
-    prover_state.add_extension_scalars(&sumcheck_poly_normal.coeffs);
+    prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
     // Sample verifier challenge.
     let r: EF = prover_state.sample();
@@ -239,16 +180,9 @@ where
     prover_state.pow_grinding(pow_bits);
 
     // Compress polynomials and update the sum.
-    #[cfg(feature = "parallel")]
     rayon::join(|| compress(evals, r), || compress(weights, r));
 
-    #[cfg(not(feature = "parallel"))]
-    {
-        compress(evals, r);
-        compress(weights, r);
-    }
-
-    *sum = sumcheck_poly.evaluate_at_point(&r.into());
+    *sum = sumcheck_poly.evaluate(r);
 
     r
 }
@@ -283,10 +217,9 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     evals: &EvaluationsList<F>,
     weights: &EvaluationsList<EF>,
     sum: EF,
-) -> SumcheckPolynomial<EF> {
+) -> WhirDensePolynomial<EF> {
     assert!(evals.num_variables() >= 1);
 
-    #[cfg(feature = "parallel")]
     let (c0, c2) = evals
         .evals()
         .par_chunks_exact(2)
@@ -296,16 +229,6 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
             || (EF::ZERO, EF::ZERO),
             |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
         );
-
-    #[cfg(not(feature = "parallel"))]
-    let (c0, c2) = evals
-        .evals()
-        .chunks_exact(2)
-        .zip(weights.evals().chunks_exact(2))
-        .map(sumcheck_quadratic::<F, EF>)
-        .fold((EF::ZERO, EF::ZERO), |(a0, a2), (b0, b2)| {
-            (a0 + b0, a2 + b2)
-        });
 
     // Compute the middle (linear) coefficient
     //
@@ -341,7 +264,48 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     let eval_1 = c0 + c1 + c2;
     let eval_2 = eval_1 + c1 + c2 + c2.double();
 
-    SumcheckPolynomial::new(vec![eval_0, eval_1, eval_2], 1)
+    WhirDensePolynomial::lagrange_interpolation(&[
+        (F::ZERO, eval_0),
+        (F::ONE, eval_1),
+        (F::TWO, eval_2),
+    ])
+    .expect("Failed to interpolate sumcheck polynomial")
+}
+
+/// Computes the partial contributions to the sumcheck polynomial from two evaluations.
+///
+/// Given two evaluations of a function and two evaluations of a weight:
+/// - \( p(0), p(1) \) and \( w(0), w(1) \)
+///
+/// this function:
+/// - Models \( p(x) = p(0) + (p(1) - p(0)) \cdot x \)
+/// - Models \( w(x) = w(0) + (w(1) - w(0)) \cdot x \)
+/// - Computes the contributions to:
+///
+/// \[
+/// p(x) \cdot w(x) = \text{const term} + \text{linear term} \cdot x + \text{quadratic term} \cdot x^2
+/// \]
+///
+/// Returns:
+/// - The **constant coefficient** (\( p(0) \cdot w(0) \))
+/// - The **quadratic coefficient** (\( (p(1) - p(0)) \cdot (w(1) - w(0)) \))
+///
+/// Note: the linear coefficient is reconstructed globally later.
+#[inline]
+pub(crate) fn sumcheck_quadratic<F, EF>((p, eq): (&[F], &[EF])) -> (EF, EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    // Compute the constant coefficient:
+    // p(0) * w(0)
+    let constant = eq[0] * p[0];
+
+    // Compute the quadratic coefficient:
+    // (p(1) - p(0)) * (w(1) - w(0))
+    let quadratic = (eq[1] - eq[0]) * (p[1] - p[0]);
+
+    (constant, quadratic)
 }
 
 /// Implements the single-round sumcheck protocol for verifying a multilinear polynomial evaluation.
@@ -486,39 +450,24 @@ where
         assert_eq!(combination_randomness.len(), points.len());
         assert_eq!(evaluations.len(), points.len());
 
-        #[cfg(feature = "parallel")]
-        {
-            use tracing::info_span;
+        use tracing::info_span;
 
-            // Parallel update of weight buffer
-            info_span!("accumulate_weight_buffer").in_scope(|| {
-                points
-                    .iter()
-                    .zip(combination_randomness.iter())
-                    .for_each(|(point, &rand)| {
-                        crate::utils::eval_eq::<_, _, true>(point, self.weights.evals_mut(), rand);
-                    });
-            });
-
-            // Accumulate the weighted sum (cheap, done sequentially)
-            self.sum += combination_randomness
-                .iter()
-                .zip(evaluations.iter())
-                .map(|(&rand, &eval)| rand * eval)
-                .sum::<EF>();
-        }
-
-        #[cfg(not(feature = "parallel"))]
-        {
-            // Accumulate the sum while applying all constraints simultaneously
+        // Parallel update of weight buffer
+        info_span!("accumulate_weight_buffer").in_scope(|| {
             points
                 .iter()
-                .zip(combination_randomness.iter().zip(evaluations.iter()))
-                .for_each(|(point, (&rand, &eval))| {
-                    crate::utils::eval_eq::<F, EF, true>(point, self.weights.evals_mut(), rand);
-                    self.sum += rand * eval;
+                .zip(combination_randomness.iter())
+                .for_each(|(point, &rand)| {
+                    crate::utils::eval_eq::<_, _, true>(point, self.weights.evals_mut(), rand);
                 });
-        }
+        });
+
+        // Accumulate the weighted sum (cheap, done sequentially)
+        self.sum += combination_randomness
+            .iter()
+            .zip(evaluations.iter())
+            .map(|(&rand, &eval)| rand * eval)
+            .sum::<EF>();
     }
 
     /// Executes the sumcheck protocol for a multilinear polynomial with optional **univariate skip**.

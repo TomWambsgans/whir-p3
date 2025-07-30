@@ -108,7 +108,11 @@ impl FoldingFactor {
 
     /// Computes the number of WHIR rounds and the number of rounds in the final sumcheck.
     #[must_use]
-    pub fn compute_number_of_rounds(&self, num_variables: usize, max_num_variables_to_send_coeffs: usize) -> (usize, usize) {
+    pub fn compute_number_of_rounds(
+        &self,
+        num_variables: usize,
+        max_num_variables_to_send_coeffs: usize,
+    ) -> (usize, usize) {
         match self {
             Self::Constant(factor) => {
                 if num_variables <= max_num_variables_to_send_coeffs {
