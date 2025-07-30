@@ -39,13 +39,11 @@ cast_sign_loss = "allow"
 serde = { version = "1.0", features = ["derive"] }
 rayon = { version = "1.0", optional = true }
 p3-field = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
-p3-baby-bear = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-koala-bear = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-merkle-tree = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-symmetric = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-matrix = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-commit = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
-p3-goldilocks = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-dft = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-util = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-maybe-rayon = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder", features = [] }

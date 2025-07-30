@@ -5,7 +5,7 @@ use p3_field::{ExtensionField, Field};
 use rayon::prelude::*;
 use tracing::instrument;
 
-use super::{coeffs::CoefficientList, multilinear::MultilinearPoint, wavelet::Radix2WaveletKernel};
+use super::multilinear::MultilinearPoint;
 use crate::utils::{eval_eq, parallel_clone, uninitialized_vec};
 
 /// Represents a multilinear polynomial `f` in `num_variables` unknowns, stored via its evaluations
@@ -224,19 +224,6 @@ where
             evals,
             num_variables: self.num_variables(),
         }
-    }
-
-    /// Convert from a list of evaluations to a list of
-    /// multilinear coefficients.
-    #[must_use]
-    #[instrument(skip_all)]
-    pub fn to_coefficients<B: Field>(self) -> CoefficientList<F>
-    where
-        F: ExtensionField<B>,
-    {
-        let kernel = Radix2WaveletKernel::<B>::default();
-        let evals = kernel.inverse_wavelet_transform_algebra(self.evals);
-        CoefficientList::new(evals)
     }
 }
 
