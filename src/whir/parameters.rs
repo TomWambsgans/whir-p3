@@ -95,9 +95,11 @@ where
             "Increase folding_factor_0"
         );
 
-        let (num_rounds, final_sumcheck_rounds) = whir_parameters
-            .folding_factor
-            .compute_number_of_rounds(mv_parameters.num_variables);
+        let (num_rounds, final_sumcheck_rounds) =
+            whir_parameters.folding_factor.compute_number_of_rounds(
+                mv_parameters.num_variables,
+                whir_parameters.max_num_variables_to_send_coeffs,
+            );
 
         let committment_ood_samples = whir_parameters.soundness_type.determine_ood_samples(
             whir_parameters.security_level,

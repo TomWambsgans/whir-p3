@@ -73,6 +73,7 @@ fn main() {
     // Construct WHIR protocol parameters
     let whir_params_a = ProtocolParameters {
         security_level: 128,
+        max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
         folding_factor: FoldingFactor::Constant(4),
         merkle_hash,
