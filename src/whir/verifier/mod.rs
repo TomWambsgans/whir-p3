@@ -35,28 +35,28 @@ pub mod sumcheck;
 /// This type provides a lightweight, ergonomic interface to verification methods
 /// by wrapping a reference to the `WhirConfig`.
 #[derive(Debug)]
-pub struct Verifier<'a, F, EF, H, C, Challenger>(
+pub struct Verifier<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
     /// Reference to the verifier’s configuration containing all round parameters.
-    pub(crate) &'a WhirConfig<F, EF, H, C, Challenger>,
+    pub(crate) &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, F, EF, H, C, Challenger> Verifier<'a, F, EF, H, C, Challenger>
+impl<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Verifier<'a, F, EF, H, C, Challenger, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
     F: ExtensionField<PF<F>>,
     Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>) -> Self {
         Self(params)
     }
 
     #[instrument(skip_all)]
     #[allow(clippy::too_many_lines)]
-    pub fn batch_verify<const DIGEST_ELEMS: usize>(
+    pub fn batch_verify(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -224,7 +224,7 @@ where
 
     #[instrument(skip_all)]
     #[allow(clippy::too_many_lines)]
-    pub fn verify<const DIGEST_ELEMS: usize>(
+    pub fn verify(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -419,7 +419,7 @@ where
     /// # Errors
     /// Returns `ProofError::InvalidProof` if Merkle proof verification fails
     /// or the prover’s data does not match the commitment.
-    pub fn verify_stir_challenges<const DIGEST_ELEMS: usize>(
+    pub fn verify_stir_challenges(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         params: &RoundConfig<F>,
@@ -499,7 +499,7 @@ where
         Ok(stir_constraints)
     }
 
-    pub fn verify_stir_challenges_batched<const DIGEST_ELEMS: usize>(
+    pub fn verify_stir_challenges_batched(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         params: &RoundConfig<F>,
@@ -634,7 +634,7 @@ where
     ///
     /// # Errors
     /// Returns `ProofError::InvalidProof` if any Merkle proof fails verification.
-    pub fn verify_merkle_proof<const DIGEST_ELEMS: usize>(
+    pub fn verify_merkle_proof(
         &self,
         verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
         root: &Hash<PF<F>, PF<F>, DIGEST_ELEMS>,
@@ -804,12 +804,12 @@ where
     }
 }
 
-impl<F, EF, H, C, Challenger> Deref for Verifier<'_, F, EF, H, C, Challenger>
+impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for Verifier<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0

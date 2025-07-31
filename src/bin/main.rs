@@ -77,7 +77,7 @@ fn main() {
     // whir_params_b.folding_factor = FoldingFactor::Constant(4 - vars_diff);
 
     let params_a =
-        WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger>::new(whir_params_a);
+        WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger, 8>::new(whir_params_a);
     // let params_b = WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger>::new(
     //     mv_params_b,
     //     whir_params_b,
@@ -154,10 +154,10 @@ fn main() {
 
     // Parse the commitment
     let parsed_commitment_a = CommitmentReader::new(&params_a)
-        .parse_commitment::<8>(&mut verifier_state)
+        .parse_commitment(&mut verifier_state)
         .unwrap();
     // let parsed_commitment_b = CommitmentReader::new(&params_b)
-    //     .parse_commitment::<8>(&mut verifier_state)
+    //     .parse_commitment(&mut verifier_state)
     //     .unwrap();
 
     let verif_time = Instant::now();

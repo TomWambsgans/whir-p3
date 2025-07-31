@@ -73,7 +73,7 @@ where
 {
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
-        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger>,
+        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         mut statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
@@ -130,7 +130,7 @@ where
 
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C, Challenger>(
-        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger>,
+        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,

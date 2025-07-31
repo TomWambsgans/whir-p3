@@ -26,15 +26,15 @@ use crate::{
 ///
 /// It provides a commitment that can be used for proof generation and verification.
 #[derive(Debug)]
-pub struct CommitmentWriter<'a, F, EF, H, C, Challenger>(
+pub struct CommitmentWriter<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
     /// Reference to the WHIR protocol configuration.
-    &'a WhirConfig<F, EF, H, C, Challenger>,
+    &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, F, EF, H, C, Challenger> CommitmentWriter<'a, F, EF, H, C, Challenger>
+impl<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> CommitmentWriter<'a, F, EF, H, C, Challenger, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<PF<F>>,
@@ -43,7 +43,7 @@ where
     Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     /// Create a new writer that borrows the WHIR protocol configuration.
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>) -> Self {
         Self(params)
     }
 
@@ -57,7 +57,7 @@ where
     /// - Computes out-of-domain (OOD) challenge points and their evaluations.
     /// - Returns a `Witness` containing the commitment data.
     #[instrument(skip_all)]
-    pub fn commit<const DIGEST_ELEMS: usize>(
+    pub fn commit(
         &self,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
@@ -111,12 +111,12 @@ where
     }
 }
 
-impl<F, EF, H, C, Challenger> Deref for CommitmentWriter<'_, F, EF, H, C, Challenger>
+impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for CommitmentWriter<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0

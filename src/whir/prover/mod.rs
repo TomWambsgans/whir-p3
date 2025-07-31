@@ -30,27 +30,27 @@ pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
 pub type Leafs<F> = Vec<Vec<F>>;
 
 #[derive(Debug)]
-pub struct Prover<'a, F, EF, H, C, Challenger>(
+pub struct Prover<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
     /// Reference to the protocol configuration shared across prover components.
-    pub &'a WhirConfig<F, EF, H, C, Challenger>,
+    pub &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<F, EF, H, C, Challenger> Deref for Prover<'_, F, EF, H, C, Challenger>
+impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for Prover<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
-impl<F, EF, H, C, Challenger> Prover<'_, F, EF, H, C, Challenger>
+impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Prover<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -102,7 +102,7 @@ where
     /// # Panics
     /// - Panics if OOD lengths are inconsistent
     /// - Panics if OOD data is non-empty despite `initial_statement = false`
-    fn validate_witness<const DIGEST_ELEMS: usize>(
+    fn validate_witness(
         &self,
         witness: &Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
@@ -112,7 +112,7 @@ where
     }
 
     #[instrument(skip_all)]
-    pub fn prove<const DIGEST_ELEMS: usize>(
+    pub fn prove(
         &self,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
@@ -163,7 +163,7 @@ where
     }
 
     #[instrument(skip_all)]
-    pub fn batch_prove<const DIGEST_ELEMS: usize>(
+    pub fn batch_prove(
         &self,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
@@ -218,7 +218,7 @@ where
 
     #[instrument(skip_all, fields(round_number = round_index, log_size = self.num_variables - self.folding_factor.total_number(round_index)))]
     #[allow(clippy::too_many_lines)]
-    fn round<const DIGEST_ELEMS: usize>(
+    fn round(
         &self,
         round_index: usize,
         dft: &EvalsDft<PF<F>>,
@@ -499,7 +499,7 @@ where
     }
 
     #[instrument(skip_all)]
-    fn final_round<const DIGEST_ELEMS: usize>(
+    fn final_round(
         &self,
         round_index: usize,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
@@ -620,7 +620,7 @@ where
 
     #[instrument(skip_all, level = "debug")]
     #[allow(clippy::type_complexity)]
-    fn compute_stir_queries<const DIGEST_ELEMS: usize>(
+    fn compute_stir_queries(
         &self,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         round_state: &RoundState<F, EF, DIGEST_ELEMS>,
