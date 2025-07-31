@@ -61,7 +61,6 @@ fn main() {
 
     // Construct WHIR protocol parameters
     let whir_params_a = WhirConfigBuilder {
-        num_variables: num_variables_a,
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
@@ -77,7 +76,7 @@ fn main() {
     // whir_params_b.folding_factor = FoldingFactor::Constant(4 - vars_diff);
 
     let params_a =
-        WhirConfig::<F, EF, MerkleHash, MerkleCompress, 8>::new(whir_params_a);
+        WhirConfig::<F, EF, MerkleHash, MerkleCompress, 8>::new(whir_params_a, num_variables_a);
     // let params_b = WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger>::new(
     //     mv_params_b,
     //     whir_params_b,

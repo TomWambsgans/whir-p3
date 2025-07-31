@@ -144,7 +144,6 @@ impl FoldingFactor {
 #[derive(Clone, Debug)]
 pub struct WhirConfigBuilder<H, C> {
     /// The logarithmic inverse rate for sampling.
-    pub num_variables: usize,
     pub starting_log_inv_rate: usize,
     pub max_num_variables_to_send_coeffs: usize,
     /// The value v such that that the size of the Reed Solomon domain on which
@@ -220,10 +219,10 @@ where
     EF: ExtensionField<F> + TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(whir_parameters: WhirConfigBuilder<Hash, C>) -> Self {
+    pub fn new(whir_parameters: WhirConfigBuilder<Hash, C>, num_variables: usize) -> Self {
         whir_parameters
             .folding_factor
-            .check_validity(whir_parameters.num_variables)
+            .check_validity(num_variables)
             .unwrap();
 
         assert!(
@@ -238,7 +237,7 @@ where
         let field_size_bits = EF::bits();
         let mut log_inv_rate = whir_parameters.starting_log_inv_rate;
 
-        let log_domain_size = whir_parameters.num_variables + log_inv_rate;
+        let log_domain_size = num_variables + log_inv_rate;
         let mut domain_size: usize = 1 << log_domain_size;
 
         // We could theorically tolerate a bigger `log_folded_domain_size` (up to EF::TWO_ADICITY), but this would reduce performance:
@@ -254,13 +253,13 @@ where
 
         let (num_rounds, final_sumcheck_rounds) =
             whir_parameters.folding_factor.compute_number_of_rounds(
-                whir_parameters.num_variables,
+                num_variables,
                 whir_parameters.max_num_variables_to_send_coeffs,
             );
 
         let committment_ood_samples = whir_parameters.soundness_type.determine_ood_samples(
             whir_parameters.security_level,
-            whir_parameters.num_variables,
+            num_variables,
             log_inv_rate,
             field_size_bits,
         );
@@ -269,13 +268,13 @@ where
             whir_parameters.security_level,
             whir_parameters.soundness_type,
             field_size_bits,
-            whir_parameters.num_variables,
+            num_variables,
             log_inv_rate,
         );
 
         let mut round_parameters = Vec::with_capacity(num_rounds);
 
-        let mut num_variables_moving = whir_parameters.num_variables;
+        let mut num_variables_moving = num_variables;
         num_variables_moving -= whir_parameters.folding_factor.at_round(0);
         for round in 0..num_rounds {
             // Queries are set w.r.t. to old rate, while the rest to the new rate
@@ -360,7 +359,7 @@ where
             security_level: whir_parameters.security_level,
             max_pow_bits: whir_parameters.pow_bits,
             committment_ood_samples,
-            num_variables: whir_parameters.num_variables,
+            num_variables: num_variables,
             soundness_type: whir_parameters.soundness_type,
             starting_log_inv_rate: whir_parameters.starting_log_inv_rate,
             starting_folding_pow_bits: starting_folding_pow_bits as usize,
