@@ -16,7 +16,7 @@ pub type RoundMerkleTree<F, EF, const DIGEST_ELEMS: usize> =
 /// including the polynomial itself, the Merkle tree used for commitment,
 /// and out-of-domain (OOD) evaluations.
 #[derive(Debug)]
-pub struct Witness<EF, F, const DIGEST_ELEMS: usize>
+pub struct Witness<F, EF, const DIGEST_ELEMS: usize>
 where
     F: Field,
     EF: ExtensionField<F>,

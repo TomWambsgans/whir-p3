@@ -26,7 +26,7 @@ use crate::{
 /// The `RoundState` evolves with each round and captures all intermediate data required
 /// to continue proving or to verify challenges from the verifier.
 #[derive(Debug)]
-pub(crate) struct RoundState<EF, F, const DIGEST_ELEMS: usize>
+pub(crate) struct RoundState<F, EF, const DIGEST_ELEMS: usize>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -64,7 +64,7 @@ where
 }
 
 #[allow(clippy::mismatching_type_param_order)]
-impl<EF, F, const DIGEST_ELEMS: usize> RoundState<EF, F, DIGEST_ELEMS>
+impl<F, EF, const DIGEST_ELEMS: usize> RoundState<F, EF, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -73,10 +73,10 @@ where
 {
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
-        prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
+        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         mut statement: Statement<EF>,
-        witness: Witness<EF, F, DIGEST_ELEMS>,
+        witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
     ) -> ProofResult<Self>
     where
@@ -130,13 +130,13 @@ where
 
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C, Challenger>(
-        prover: &Prover<'_, EF, F, MyChallenger, C, Challenger>,
+        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
-        witness_a: Witness<EF, F, DIGEST_ELEMS>,
+        witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,
         statement_b: Statement<EF>,
-        witness_b: Witness<EF, F, DIGEST_ELEMS>,
+        witness_b: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_b: &EvaluationsList<F>,
     ) -> ProofResult<Self>
     where

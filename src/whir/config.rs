@@ -181,7 +181,7 @@ pub struct RoundConfig<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct WhirConfig<EF, F, Hash, C, Challenger>
+pub struct WhirConfig<F, EF, Hash, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -214,7 +214,7 @@ where
     pub _challenger: PhantomData<Challenger>,
 }
 
-impl<EF, F, Hash, C, Challenger> WhirConfig<EF, F, Hash, C, Challenger>
+impl<F, EF, Hash, C, Challenger> WhirConfig<F, EF, Hash, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -594,7 +594,7 @@ where
     }
 }
 
-impl<EF, F, Hash, C, Challenger> ToString for WhirConfig<EF, F, Hash, C, Challenger>
+impl<F, EF, Hash, C, Challenger> ToString for WhirConfig<F, EF, Hash, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F>,

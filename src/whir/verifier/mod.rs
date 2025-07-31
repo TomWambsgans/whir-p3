@@ -35,22 +35,22 @@ pub mod sumcheck;
 /// This type provides a lightweight, ergonomic interface to verification methods
 /// by wrapping a reference to the `WhirConfig`.
 #[derive(Debug)]
-pub struct Verifier<'a, EF, F, H, C, Challenger>(
+pub struct Verifier<'a, F, EF, H, C, Challenger>(
     /// Reference to the verifier’s configuration containing all round parameters.
-    pub(crate) &'a WhirConfig<EF, F, H, C, Challenger>,
+    pub(crate) &'a WhirConfig<F, EF, H, C, Challenger>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, EF, F, H, C, Challenger> Verifier<'a, EF, F, H, C, Challenger>
+impl<'a, F, EF, H, C, Challenger> Verifier<'a, F, EF, H, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
     F: ExtensionField<PF<F>>,
     Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
-    pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger>) -> Self {
         Self(params)
     }
 
@@ -109,7 +109,7 @@ where
         round_constraints.push((combination_randomness, constraints));
 
         // Initial sumcheck
-        let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+        let folding_randomness = verify_sumcheck_rounds::<F, EF, _>(
             verifier_state,
             &mut claimed_sum,
             self.folding_factor.at_round(0) + 1,
@@ -159,7 +159,7 @@ where
                 self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
             round_constraints.push((combination_randomness.clone(), constraints));
 
-            let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+            let folding_randomness = verify_sumcheck_rounds::<F, EF, _>(
                 verifier_state,
                 &mut claimed_sum,
                 self.folding_factor.at_round(round_index + 1),
@@ -193,7 +193,7 @@ where
             .then_some(())
             .ok_or(ProofError::InvalidProof)?;
 
-        let final_sumcheck_randomness = verify_sumcheck_rounds::<EF, F, _>(
+        let final_sumcheck_randomness = verify_sumcheck_rounds::<F, EF, _>(
             verifier_state,
             &mut claimed_sum,
             self.final_sumcheck_rounds,
@@ -257,7 +257,7 @@ where
         round_constraints.push((combination_randomness, constraints));
 
         // Initial sumcheck
-        let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+        let folding_randomness = verify_sumcheck_rounds::<F, EF, _>(
             verifier_state,
             &mut claimed_sum,
             self.folding_factor.at_round(0),
@@ -296,7 +296,7 @@ where
                 self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
             round_constraints.push((combination_randomness.clone(), constraints));
 
-            let folding_randomness = verify_sumcheck_rounds::<EF, F, _>(
+            let folding_randomness = verify_sumcheck_rounds::<F, EF, _>(
                 verifier_state,
                 &mut claimed_sum,
                 self.folding_factor.at_round(round_index + 1),
@@ -330,7 +330,7 @@ where
             .then_some(())
             .ok_or(ProofError::InvalidProof)?;
 
-        let final_sumcheck_randomness = verify_sumcheck_rounds::<EF, F, _>(
+        let final_sumcheck_randomness = verify_sumcheck_rounds::<F, EF, _>(
             verifier_state,
             &mut claimed_sum,
             self.final_sumcheck_rounds,
@@ -804,12 +804,12 @@ where
     }
 }
 
-impl<EF, F, H, C, Challenger> Deref for Verifier<'_, EF, F, H, C, Challenger>
+impl<F, EF, H, C, Challenger> Deref for Verifier<'_, F, EF, H, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<EF, F, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger>;
 
     fn deref(&self) -> &Self::Target {
         self.0

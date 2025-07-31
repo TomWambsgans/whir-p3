@@ -30,27 +30,27 @@ pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
 pub type Leafs<F> = Vec<Vec<F>>;
 
 #[derive(Debug)]
-pub struct Prover<'a, EF, F, H, C, Challenger>(
+pub struct Prover<'a, F, EF, H, C, Challenger>(
     /// Reference to the protocol configuration shared across prover components.
-    pub &'a WhirConfig<EF, F, H, C, Challenger>,
+    pub &'a WhirConfig<F, EF, H, C, Challenger>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<EF, F, H, C, Challenger> Deref for Prover<'_, EF, F, H, C, Challenger>
+impl<F, EF, H, C, Challenger> Deref for Prover<'_, F, EF, H, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<EF, F, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger>;
 
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
-impl<EF, F, H, C, Challenger> Prover<'_, EF, F, H, C, Challenger>
+impl<F, EF, H, C, Challenger> Prover<'_, F, EF, H, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -104,7 +104,7 @@ where
     /// - Panics if OOD data is non-empty despite `initial_statement = false`
     fn validate_witness<const DIGEST_ELEMS: usize>(
         &self,
-        witness: &Witness<EF, F, DIGEST_ELEMS>,
+        witness: &Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
     ) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
@@ -117,7 +117,7 @@ where
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement: Statement<EF>,
-        witness: Witness<EF, F, DIGEST_ELEMS>,
+        witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
@@ -168,10 +168,10 @@ where
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
-        witness_a: Witness<EF, F, DIGEST_ELEMS>,
+        witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,
         statement_b: Statement<EF>,
-        witness_b: Witness<EF, F, DIGEST_ELEMS>,
+        witness_b: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_b: &EvaluationsList<F>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
@@ -223,7 +223,7 @@ where
         round_index: usize,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
+        round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -503,7 +503,7 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        round_state: &mut RoundState<EF, F, DIGEST_ELEMS>,
+        round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -623,7 +623,7 @@ where
     fn compute_stir_queries<const DIGEST_ELEMS: usize>(
         &self,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        round_state: &RoundState<EF, F, DIGEST_ELEMS>,
+        round_state: &RoundState<F, EF, DIGEST_ELEMS>,
         num_variables: usize,
         round_params: &RoundConfig<F>,
         ood_points: &[EF],

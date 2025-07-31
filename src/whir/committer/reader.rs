@@ -120,18 +120,18 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
 /// The `CommitmentReader` wraps the WHIR configuration and provides a convenient
 /// method to extract a `ParsedCommitment` by reading values from the Fiat-Shamir transcript.
 #[derive(Debug)]
-pub struct CommitmentReader<'a, EF, F, H, C, Challenger>(
+pub struct CommitmentReader<'a, F, EF, H, C, Challenger>(
     /// Reference to the verifier’s configuration object.
     ///
     /// This contains all parameters needed to parse the commitment,
     /// including how many out-of-domain samples are expected.
-    &'a WhirConfig<EF, F, H, C, Challenger>,
+    &'a WhirConfig<F, EF, H, C, Challenger>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, EF, F, H, C, Challenger> CommitmentReader<'a, EF, F, H, C, Challenger>
+impl<'a, F, EF, H, C, Challenger> CommitmentReader<'a, F, EF, H, C, Challenger>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
@@ -140,7 +140,7 @@ where
     /// Create a new commitment reader from a WHIR configuration.
     ///
     /// This allows the verifier to parse a commitment from the Fiat-Shamir transcript.
-    pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger>) -> Self {
         Self(params)
     }
 
@@ -160,12 +160,12 @@ where
     }
 }
 
-impl<EF, F, H, C, Challenger> Deref for CommitmentReader<'_, EF, F, H, C, Challenger>
+impl<F, EF, H, C, Challenger> Deref for CommitmentReader<'_, F, EF, H, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<EF, F, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger>;
 
     fn deref(&self) -> &Self::Target {
         self.0

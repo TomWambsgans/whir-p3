@@ -41,7 +41,7 @@ type SumcheckRandomness<F> = MultilinearPoint<F>;
 /// # Returns
 ///
 /// - A `MultilinearPoint` of folding randomness values in reverse order.
-pub(crate) fn verify_sumcheck_rounds<EF, F, Challenger>(
+pub(crate) fn verify_sumcheck_rounds<F, EF, Challenger>(
     verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
     claimed_sum: &mut EF,
     rounds: usize,

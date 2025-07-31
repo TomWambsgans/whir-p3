@@ -26,15 +26,15 @@ use crate::{
 ///
 /// It provides a commitment that can be used for proof generation and verification.
 #[derive(Debug)]
-pub struct CommitmentWriter<'a, EF, F, H, C, Challenger>(
+pub struct CommitmentWriter<'a, F, EF, H, C, Challenger>(
     /// Reference to the WHIR protocol configuration.
-    &'a WhirConfig<EF, F, H, C, Challenger>,
+    &'a WhirConfig<F, EF, H, C, Challenger>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, EF, F, H, C, Challenger> CommitmentWriter<'a, EF, F, H, C, Challenger>
+impl<'a, F, EF, H, C, Challenger> CommitmentWriter<'a, F, EF, H, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<PF<F>>,
@@ -43,7 +43,7 @@ where
     Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     /// Create a new writer that borrows the WHIR protocol configuration.
-    pub const fn new(params: &'a WhirConfig<EF, F, H, C, Challenger>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger>) -> Self {
         Self(params)
     }
 
@@ -62,7 +62,7 @@ where
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         polynomial: &EvaluationsList<F>,
-    ) -> ProofResult<Witness<EF, F, DIGEST_ELEMS>>
+    ) -> ProofResult<Witness<F, EF, DIGEST_ELEMS>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
             + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
@@ -111,12 +111,12 @@ where
     }
 }
 
-impl<EF, F, H, C, Challenger> Deref for CommitmentWriter<'_, EF, F, H, C, Challenger>
+impl<F, EF, H, C, Challenger> Deref for CommitmentWriter<'_, F, EF, H, C, Challenger>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<EF, F, H, C, Challenger>;
+    type Target = WhirConfig<F, EF, H, C, Challenger>;
 
     fn deref(&self) -> &Self::Target {
         self.0

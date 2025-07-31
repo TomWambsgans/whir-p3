@@ -23,7 +23,7 @@ use p3_field::{ExtensionField, Field};
 /// - \( o^{-1} \) is the inverse coset offset
 /// - \( g^{-i} \) is the inverse generator raised to index \( i \)
 /// - The function is recursively applied until the vector reduces to size 1.
-pub fn compute_fold<EF, F>(
+pub fn compute_fold<F, EF>(
     answers: &[F],
     folding_randomness: &[EF],
     mut coset_offset_inv: EF,
