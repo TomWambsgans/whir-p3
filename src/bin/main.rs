@@ -55,7 +55,7 @@ fn main() {
 
     // let vars_diff = 1;
 
-    let num_variables_a = 25;
+    let num_variables_a = 22;
     // let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
@@ -69,12 +69,12 @@ fn main() {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::ConstantFromSecondRound(7, 4),
+        folding_factor: FoldingFactor::ConstantFromSecondRound(4, 4),
         merkle_hash,
         merkle_compress,
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
-        rs_domain_initial_reduction_factor: 5,
+        rs_domain_initial_reduction_factor: 3,
     };
 
     // let mut whir_params_b = whir_params_a.clone();

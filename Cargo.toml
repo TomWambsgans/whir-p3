@@ -40,6 +40,7 @@ serde = { version = "1.0", features = ["derive"] }
 rayon = { version = "1.0" }
 p3-field = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-koala-bear = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
+p3-baby-bear = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-merkle-tree = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-symmetric = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }
 p3-matrix = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "extension-packed-field-air-builder" }

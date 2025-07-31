@@ -1,3 +1,4 @@
+use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
 use p3_challenger::{DuplexChallenger, FieldChallenger, GrindingChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
@@ -223,6 +224,12 @@ pub trait ChallengerState {
 }
 
 impl ChallengerState for DuplexChallenger<KoalaBear, Poseidon2KoalaBear<16>, 16, 8> {
+    fn state(&self) -> String {
+        format!("{:?}", self.sponge_state)
+    }
+}
+
+impl ChallengerState for DuplexChallenger<BabyBear, Poseidon2BabyBear<16>, 16, 8> {
     fn state(&self) -> String {
         format!("{:?}", self.sponge_state)
     }
