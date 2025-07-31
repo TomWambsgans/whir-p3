@@ -12,25 +12,7 @@ use crate::{
 
 const PARALLEL_THRESHOLD: usize = 4096;
 
-/// Folds a list of evaluations from a base field `F` into an extension field `EF`.
-///
-/// This function performs an out-of-place compression of a polynomial's evaluations. It takes evaluations
-/// over a base field `F`, folds them using a random value `r` from an extension field `EF`, and returns a new
-/// list of evaluations in `EF`. This operation effectively reduces the number of variables in the
-/// represented multilinear polynomial by one.
-///
-/// ## Arguments
-/// * `evals`: A reference to an `EvaluationsList<F>` containing the evaluations of a multilinear
-///   polynomial over the boolean hypercube in the base field `F`.
-/// * `r`: A value `r` from the extension field `EF`, used as the random challenge for folding.
-///
-/// ## Returns
-/// A new `EvaluationsList<EF>` containing the compressed evaluations in the extension field.
-///
-/// The compression is achieved by applying the following formula to pairs of evaluations:
-///
-/// The compression is achieved by applying the following formula to pairs of evaluations:
-/// $p'(X_2, ..., X_n) = (p(1, X_2, ..., X_n) - p(0, X_2, ..., X_n)) \cdot r + p(0, X_2, ..., X_n)$
+
 #[instrument(skip_all)]
 pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
     evals: &EvaluationsList<F>,
@@ -41,10 +23,6 @@ pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
     // Fold between base and extension field elements
     let fold = |slice: &[F]| -> EF { r * (slice[1] - slice[0]) + slice[0] };
 
-    // Threshold below which sequential computation is faster
-    //
-    // This was chosen based on experiments with the `compress` function.
-    // It is possible that the threshold can be tuned further.
     let folded = if evals.evals().len() >= PARALLEL_THRESHOLD {
         evals.evals().par_chunks_exact(2).map(fold).collect()
     } else {
@@ -54,31 +32,10 @@ pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
     EvaluationsList::new(folded)
 }
 
-/// Compresses a list of evaluations in-place using a random challenge.
-///
-/// This function performs an in-place memory optimization for the folding step
-/// in the sumcheck protocol.
-///
-/// ## Algorithm
-/// For smaller inputs, this function avoids allocating a new vector by overwriting
-/// the first half of the existing evaluation list and then truncating it.
-/// For larger inputs (determined by `PARALLEL_THRESHOLD`), it uses a parallel,
-/// out-of-place method to maximize performance, consistent with the original implementation.
-///
-/// ## Arguments
-/// * `evals`: A mutable reference to an `EvaluationsList<F>`, which will be modified in-place.
-/// * `r`: A value from the field `F`, used as the random folding challenge.
-///
-/// ## Mathematical Formula
-/// The compression is achieved by applying the following formula to pairs of evaluations:
-/// $p'(X_2, ..., X_n) = (p(1, X_2, ..., X_n) - p(0, X_2, ..., X_n)) \cdot r + p(0, X_2, ..., X_n)$
+
 pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
-    // Ensure the polynomial is not a constant (i.e., has variables to fold).
     assert_ne!(evals.num_variables(), 0);
 
-    // The sequential, in-place logic is used for the non-parallel build
-    // and for smaller inputs in the parallel build.
-    // For large inputs, we use the original parallel, out-of-place strategy for maximum speed.
     if evals.evals().len() >= PARALLEL_THRESHOLD {
         // Define the folding operation for a pair of elements.
         let fold = |slice: &[F]| -> F { r * (slice[1] - slice[0]) + slice[0] };
@@ -99,24 +56,6 @@ pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
     }
 }
 
-/// Executes the initial round of the sumcheck protocol.
-///
-/// This function executes the initial round of the sumcheck protocol, which is unique because it
-/// transitions the polynomial evaluations from the base field `F` to the extension field `EF`.
-/// It computes the sumcheck polynomial, incorporates it into the prover's state, derives a challenge,
-/// and then uses that challenge to compress both the polynomial evaluations and the constraint weights.
-///
-/// ## Arguments
-/// * `prover_state`: A mutable reference to the `ProverState`, which manages the Fiat-Shamir transcript.
-/// * `evals`: A reference to the polynomial's evaluations in the base field `F`.
-/// * `weights`: A mutable reference to the weight evaluations in the extension field `EF`.
-/// * `sum`: A mutable reference to the claimed sum, which is updated with the new value after folding.
-/// * `pow_bits`: The number of proof-of-work bits for the grinding protocol.
-///
-/// ## Returns
-/// A tuple containing:
-/// * The verifier's challenge `r` as an `EF` element.
-/// * The new, compressed polynomial evaluations as an `EvaluationsList<EF>`.
 fn initial_round<Challenger, F: Field, EF: ExtensionField<F> + ExtensionField<PF<F>>>(
     prover_state: &mut ProverState<PF<F>, EF, Challenger>,
     evals: &EvaluationsList<F>,
@@ -187,31 +126,19 @@ where
     r
 }
 
-/// Computes the sumcheck polynomial `h(X)`, a quadratic polynomial resulting from the folding step.
-///
-/// The sumcheck polynomial is computed as:
-///
-/// \[
-/// h(X) = \sum_b p(b, X) \cdot w(b, X)
-/// \]
-///
-/// where:
-/// - `b` ranges over evaluation points in `{0,1,2}^1` (i.e., two points per fold).
-/// - `p(b, X)` is the polynomial evaluation at `b` as a function of `X`.
-/// - `w(b, X)` is the associated weight applied at `b` as a function of `X`.
-///
-/// **Mathematical model:**
-/// - Each chunk of two evaluations encodes a linear polynomial in `X`.
-/// - The product `p(X) * w(X)` is a quadratic polynomial.
-/// - We compute the constant and quadratic coefficients first, then infer the linear coefficient using:
-///
-/// \[
-/// \text{sum} = 2 \cdot c_0 + c_1 + c_2
-/// \]
-///
-/// where `sum` is the accumulated constraint sum.
-///
-/// Returns a `SumcheckPolynomial` with evaluations at `X = 0, 1, 2`.
+pub fn univariate_selectors<F: Field>(n: usize) -> Vec<WhirDensePolynomial<F>> {
+    (0..1 << n)
+        .into_par_iter()
+        .map(|i| {
+            let values = (0..1 << n)
+                .map(|j| (F::from_u64(j), if i == j { F::ONE } else { F::ZERO }))
+                .collect::<Vec<_>>();
+            WhirDensePolynomial::lagrange_interpolation(&values).unwrap()
+        })
+        .collect()
+}
+
+
 #[instrument(skip_all, level = "debug")]
 pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     evals: &EvaluationsList<F>,
@@ -230,36 +157,10 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
             |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
         );
 
-    // Compute the middle (linear) coefficient
-    //
-    // The quadratic polynomial h(X) has the form:
-    //     h(X) = c0 + c1 * X + c2 * X^2
-    //
-    // We already computed:
-    // - c0: the constant coefficient (contribution at X=0)
-    // - c2: the quadratic coefficient (contribution at X^2)
-    //
-    // To recover c1 (linear term), we use the known sum rule:
-    //     sum = h(0) + h(1)
-    // Expand h(0) and h(1):
-    //     h(0) = c0
-    //     h(1) = c0 + c1 + c2
-    // Therefore:
-    //     sum = c0 + (c0 + c1 + c2) = 2*c0 + c1 + c2
-    //
-    // Rearranging for c1 gives:
-    //     c1 = sum - 2*c0 - c2
+   
     let c1 = sum - c0.double() - c2;
 
-    // Evaluate the quadratic polynomial at points 0, 1, 2
-    //
-    // Evaluate:
-    //     h(0) = c0
-    //     h(1) = c0 + c1 + c2
-    //     h(2) = c0 + 2*c1 + 4*c2
-    //
-    // To compute h(2) efficiently, observe:
-    //     h(2) = h(1) + (c1 + 2*c2)
+   
     let eval_0 = c0;
     let eval_1 = c0 + c1 + c2;
     let eval_2 = eval_1 + c1 + c2 + c2.double();
@@ -272,25 +173,6 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     .expect("Failed to interpolate sumcheck polynomial")
 }
 
-/// Computes the partial contributions to the sumcheck polynomial from two evaluations.
-///
-/// Given two evaluations of a function and two evaluations of a weight:
-/// - \( p(0), p(1) \) and \( w(0), w(1) \)
-///
-/// this function:
-/// - Models \( p(x) = p(0) + (p(1) - p(0)) \cdot x \)
-/// - Models \( w(x) = w(0) + (w(1) - w(0)) \cdot x \)
-/// - Computes the contributions to:
-///
-/// \[
-/// p(x) \cdot w(x) = \text{const term} + \text{linear term} \cdot x + \text{quadratic term} \cdot x^2
-/// \]
-///
-/// Returns:
-/// - The **constant coefficient** (\( p(0) \cdot w(0) \))
-/// - The **quadratic coefficient** (\( (p(1) - p(0)) \cdot (w(1) - w(0)) \))
-///
-/// Note: the linear coefficient is reconstructed globally later.
 #[inline]
 pub(crate) fn sumcheck_quadratic<F, EF>((p, eq): (&[F], &[EF])) -> (EF, EF)
 where
@@ -308,25 +190,6 @@ where
     (constant, quadratic)
 }
 
-/// Implements the single-round sumcheck protocol for verifying a multilinear polynomial evaluation.
-///
-/// This struct is responsible for:
-/// - Transforming a polynomial from coefficient representation into evaluation form.
-/// - Constructing and evaluating weighted constraints.
-/// - Computing the sumcheck polynomial, which is a quadratic polynomial in a single variable.
-///
-/// Given a multilinear polynomial `p(X1, ..., Xn)`, the sumcheck polynomial is computed as:
-///
-/// \begin{equation}
-/// h(X) = \sum_b p(b, X) \cdot w(b, X)
-/// \end{equation}
-///
-/// where:
-/// - `b` ranges over evaluation points in `{0,1,2}^k` (with `k=1` in this implementation).
-/// - `w(b, X)` represents generic weights applied to `p(b, X)`.
-/// - The result `h(X)` is a quadratic polynomial in `X`.
-///
-/// The sumcheck protocol ensures that the claimed sum is correct.
 #[derive(Debug, Clone)]
 pub struct SumcheckSingle<F, EF> {
     /// Evaluations of the polynomial `p(X)`.
@@ -344,37 +207,6 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// Constructs a new `SumcheckSingle` instance from evaluations in the extension field.
-    ///
-    /// This function:
-    /// - Uses precomputed evaluations of the polynomial `p` over the Boolean hypercube,
-    ///   where `p` is already represented over the extension field `EF`.
-    /// - Applies the provided `Statement` to compute equality weights and the expected sum.
-    /// - Initializes the internal state used in the sumcheck protocol.
-    ///
-    /// This is the entry point when the polynomial is defined directly over `EF`.
-    pub fn from_extension_evals(
-        evals: EvaluationsList<EF>,
-        statement: &Statement<EF>,
-        combination_randomness: EF,
-    ) -> Self {
-        let (weights, sum) = statement.combine::<F>(combination_randomness);
-
-        Self {
-            evals,
-            weights,
-            sum,
-            phantom: std::marker::PhantomData,
-        }
-    }
-
-    /// Constructs a new `SumcheckSingle` instance from evaluations in the base field.
-    ///
-    /// This function:
-    /// - Uses precomputed evaluations of the polynomial `p` over the Boolean hypercube.
-    /// - Applies the given constraint `Statement` using a random linear combination.
-    /// - Initializes internal sumcheck state with weights and expected sum.
-    /// - Applies first set of sumcheck rounds
     #[instrument(skip_all)]
     pub fn from_base_evals<Challenger>(
         evals: &EvaluationsList<F>,
@@ -403,7 +235,6 @@ where
             round::<_, F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)
         }));
 
-        // Reverse challenges to maintain order from X₀ to Xₙ.
         res.reverse();
 
         let sumcheck = Self {
@@ -416,28 +247,10 @@ where
         (sumcheck, MultilinearPoint(res))
     }
 
-    /// Returns the number of variables in the polynomial.
     pub const fn num_variables(&self) -> usize {
         self.evals.num_variables()
     }
 
-    /// Adds new weighted constraints to the polynomial.
-    ///
-    /// This function updates the weight evaluations and sum by incorporating new constraints.
-    ///
-    /// Given points `z_i`, weights `ε_i`, and evaluation values `f(z_i)`, it updates:
-    ///
-    /// \begin{equation}
-    ///     w(X) = w(X) + \sum ε_i \cdot w_{z_i}(X)
-    /// \end{equation}
-    ///
-    /// and updates the sum as:
-    ///
-    /// \begin{equation}
-    ///     S = S + \sum ε_i \cdot f(z_i)
-    /// \end{equation}
-    ///
-    /// where `w_{z_i}(X)` represents the constraint encoding at point `z_i`.
     #[instrument(skip_all, fields(
         num_points = points.len(),
     ))]
@@ -452,7 +265,6 @@ where
 
         use tracing::info_span;
 
-        // Parallel update of weight buffer
         info_span!("accumulate_weight_buffer").in_scope(|| {
             points
                 .iter()
@@ -462,7 +274,6 @@ where
                 });
         });
 
-        // Accumulate the weighted sum (cheap, done sequentially)
         self.sum += combination_randomness
             .iter()
             .zip(evaluations.iter())
@@ -470,31 +281,6 @@ where
             .sum::<EF>();
     }
 
-    /// Executes the sumcheck protocol for a multilinear polynomial with optional **univariate skip**.
-    ///
-    /// This function performs `folding_factor` rounds of the sumcheck protocol:
-    ///
-    /// - At each round, a univariate polynomial is sent representing a partial sum over a subset of variables.
-    /// - The verifier responds with a random challenge that is used to fix one variable.
-    /// - Optionally, the first `k` rounds can be skipped using the **univariate skip** optimization,
-    ///   which collapses multiple Boolean variables at once over a multiplicative subgroup.
-    ///
-    /// The univariate skip is performed entirely in the base field and reduces expensive extension field
-    /// computations, improving prover efficiency.
-    ///
-    /// # Arguments
-    /// - `prover_state`: The state of the prover, managing Fiat-Shamir transcript and PoW grinding.
-    /// - `folding_factor`: Number of variables to fold in total.
-    /// - `pow_bits`: Number of PoW bits used to delay the prover (0.0 to disable).
-    /// - `k_skip`: Optional number of initial variables to skip using the univariate optimization.
-    /// - `dft`: A two-adic FFT backend used for low-degree extensions over cosets.
-    ///
-    /// # Returns
-    /// A `MultilinearPoint<EF>` representing the verifier's challenges across all folded variables.
-    ///
-    /// # Panics
-    /// - If `folding_factor > num_variables()`
-    /// - If univariate skip is attempted with evaluations in the extension field.
     #[instrument(skip_all)]
     pub fn compute_sumcheck_polynomials<Challenger>(
         &mut self,
@@ -508,8 +294,6 @@ where
         Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
         EF: ExtensionField<PF<F>>,
     {
-        // Standard round-by-round folding
-        // Proceed with one-variable-per-round folding for remaining variables.
         let mut res = (0..folding_factor)
             .map(|_| {
                 round::<_, F, EF>(
@@ -522,10 +306,8 @@ where
             })
             .collect::<Vec<_>>();
 
-        // Reverse challenges to maintain order from X₀ to Xₙ.
         res.reverse();
 
-        // Return the full vector of verifier challenges as a multilinear point.
         MultilinearPoint(res)
     }
 }

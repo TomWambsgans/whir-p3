@@ -176,7 +176,7 @@ where
         PF<F>: TwoAdicField,
         StandardUniform: Distribution<EF>,
     {
-        // X PolA + (1 - X) PolB
+        // Xn PolA + (1 - Xn) PolB
 
         assert_eq!(
             witness_a.polynomial.num_variables(),
