@@ -8,7 +8,7 @@ use crate::{
     PF,
     fiat_shamir::{errors::ProofResult, verifier::VerifierState},
     poly::multilinear::MultilinearPoint,
-    whir::{parameters::WhirConfig, statement::constraint::Constraint},
+    whir::{config::WhirConfig, statement::constraint::Constraint},
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -154,7 +154,7 @@ where
     ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>> {
         ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
             verifier_state,
-            self.mv_parameters.num_variables,
+            self.num_variables,
             self.committment_ood_samples,
         )
     }

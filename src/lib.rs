@@ -2,7 +2,6 @@ use p3_field::{Field, PrimeCharacteristicRing};
 
 pub mod dft;
 pub mod fiat_shamir;
-pub mod parameters;
 pub mod poly;
 pub mod sumcheck;
 pub mod utils;

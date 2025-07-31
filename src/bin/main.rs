@@ -10,14 +10,12 @@ use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::Subscr
 use whir_p3::{
     dft::EvalsDft,
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
-    parameters::{
-        DEFAULT_MAX_POW, FoldingFactor, MultivariateParameters, ProtocolParameters,
-        errors::SecurityAssumption,
-    },
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::{
         committer::{reader::CommitmentReader, writer::CommitmentWriter},
-        parameters::WhirConfig,
+        config::{
+            DEFAULT_MAX_POW, FoldingFactor, SecurityAssumption, WhirConfig, WhirConfigBuilder,
+        },
         prover::Prover,
         statement::Statement,
         verifier::Verifier,
@@ -61,11 +59,9 @@ fn main() {
     let num_coeffs_a = 1 << num_variables_a;
     // let num_coeffs_b = 1 << num_variables_b;
 
-    let mv_params_a = MultivariateParameters::<EF>::new(num_variables_a);
-    // let mv_params_b = MultivariateParameters::<EF>::new(num_variables_b);
-
     // Construct WHIR protocol parameters
-    let whir_params_a = ProtocolParameters {
+    let whir_params_a = WhirConfigBuilder {
+        num_variables: num_variables_a,
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
@@ -80,10 +76,8 @@ fn main() {
     // let mut whir_params_b = whir_params_a.clone();
     // whir_params_b.folding_factor = FoldingFactor::Constant(4 - vars_diff);
 
-    let params_a = WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(
-        mv_params_a,
-        whir_params_a,
-    );
+    let params_a =
+        WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(whir_params_a);
     // let params_b = WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(
     //     mv_params_b,
     //     whir_params_b,

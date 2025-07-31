@@ -16,7 +16,7 @@ use crate::{
     fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
     poly::evals::EvaluationsList,
     utils::parallel_repeat,
-    whir::{parameters::WhirConfig, utils::sample_ood_points},
+    whir::{config::WhirConfig, utils::sample_ood_points},
 };
 
 /// Responsible for committing polynomials using a Merkle-based scheme.
@@ -98,7 +98,7 @@ where
         let (ood_points, ood_answers) = sample_ood_points::<F, EF, _, _>(
             prover_state,
             self.committment_ood_samples,
-            self.mv_parameters.num_variables,
+            self.num_variables,
             |point| info_span!("ood evaluation").in_scope(|| polynomial.evaluate(point)),
         );
 

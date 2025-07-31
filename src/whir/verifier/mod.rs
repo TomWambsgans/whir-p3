@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::{
-    committer::reader::ParsedCommitment, parameters::RoundConfig,
-    statement::constraint::Constraint, utils::get_challenge_stir_queries,
+    committer::reader::ParsedCommitment, statement::constraint::Constraint,
+    utils::get_challenge_stir_queries,
 };
 use crate::{
     PF,
@@ -22,7 +22,9 @@ use crate::{
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     utils::pack_scalars_to_extension,
     whir::{
-        parameters::WhirConfig, statement::Statement, verifier::sumcheck::verify_sumcheck_rounds,
+        config::{RoundConfig, WhirConfig},
+        statement::Statement,
+        verifier::sumcheck::verify_sumcheck_rounds,
     },
 };
 
@@ -780,7 +782,7 @@ where
         constraints: &[(Vec<EF>, Vec<Constraint<EF>>)],
         mut point: MultilinearPoint<EF>,
     ) -> EF {
-        let mut num_variables = self.mv_parameters.num_variables;
+        let mut num_variables = self.num_variables;
         let mut value = EF::ZERO;
 
         for (round, (randomness, constraints)) in constraints.iter().enumerate() {

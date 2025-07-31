@@ -5,10 +5,14 @@ use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
-    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState}, poly::{evals::EvaluationsList, multilinear::MultilinearPoint}, sumcheck::SumcheckSingle, whir::{
+    PF,
+    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
+    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    sumcheck::SumcheckSingle,
+    whir::{
         committer::{RoundMerkleTree, Witness},
         statement::Statement,
-    }, PF
+    },
 };
 
 /// Holds all per-round prover state required during the execution of the WHIR protocol.
@@ -84,10 +88,7 @@ where
             .into_iter()
             .zip(witness.ood_answers)
             .map(|(point, evaluation)| {
-                let weights = MultilinearPoint::expand_from_univariate(
-                    point,
-                    prover.mv_parameters.num_variables,
-                );
+                let weights = MultilinearPoint::expand_from_univariate(point, prover.num_variables);
                 (weights, evaluation)
             })
             .collect();
@@ -106,9 +107,9 @@ where
         );
 
         let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
-            let mut randomness_vec = Vec::with_capacity(prover.mv_parameters.num_variables);
+            let mut randomness_vec = Vec::with_capacity(prover.num_variables);
             randomness_vec.extend(folding_randomness.iter().rev().copied());
-            randomness_vec.resize(prover.mv_parameters.num_variables, EF::ZERO);
+            randomness_vec.resize(prover.num_variables, EF::ZERO);
             randomness_vec
         });
 
@@ -199,9 +200,9 @@ where
         );
 
         let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
-            let mut randomness_vec = Vec::with_capacity(prover.mv_parameters.num_variables);
+            let mut randomness_vec = Vec::with_capacity(prover.num_variables);
             randomness_vec.extend(folding_randomness.iter().rev().copied());
-            randomness_vec.resize(prover.mv_parameters.num_variables, EF::ZERO);
+            randomness_vec.resize(prover.num_variables, EF::ZERO);
             randomness_vec
         });
 

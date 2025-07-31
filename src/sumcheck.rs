@@ -12,7 +12,6 @@ use crate::{
 
 const PARALLEL_THRESHOLD: usize = 4096;
 
-
 #[instrument(skip_all)]
 pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
     evals: &EvaluationsList<F>,
@@ -31,7 +30,6 @@ pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
 
     EvaluationsList::new(folded)
 }
-
 
 pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
     assert_ne!(evals.num_variables(), 0);
@@ -138,7 +136,6 @@ pub fn univariate_selectors<F: Field>(n: usize) -> Vec<WhirDensePolynomial<F>> {
         .collect()
 }
 
-
 #[instrument(skip_all, level = "debug")]
 pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     evals: &EvaluationsList<F>,
@@ -157,10 +154,8 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
             |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
         );
 
-   
     let c1 = sum - c0.double() - c2;
 
-   
     let eval_0 = c0;
     let eval_1 = c0 + c1 + c2;
     let eval_2 = eval_1 + c1 + c2 + c2.double();

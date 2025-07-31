@@ -11,7 +11,7 @@ use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
-use super::{committer::Witness, parameters::WhirConfig, statement::Statement};
+use super::{committer::Witness, statement::Statement};
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
@@ -19,7 +19,7 @@ use crate::{
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     utils::{flatten_scalars_to_base, parallel_repeat},
     whir::{
-        parameters::RoundConfig,
+        config::{RoundConfig, WhirConfig},
         utils::{get_challenge_stir_queries, sample_ood_points},
     },
 };
@@ -67,7 +67,7 @@ where
     /// # Returns
     /// `true` if the parameter configuration is consistent, `false` otherwise.
     fn validate_parameters(&self) -> bool {
-        self.mv_parameters.num_variables
+        self.num_variables
             == self.folding_factor.total_number(self.n_rounds()) + self.final_sumcheck_rounds
     }
 
@@ -83,7 +83,7 @@ where
     /// # Returns
     /// `true` if the statement structure is valid for this protocol instance.
     fn validate_statement(&self, statement: &Statement<EF>) -> bool {
-        statement.num_variables() == self.mv_parameters.num_variables
+        statement.num_variables() == self.num_variables
     }
 
     /// Validates that the witness satisfies the structural requirements of the WHIR prover.
@@ -108,7 +108,7 @@ where
         polynomial: &EvaluationsList<F>,
     ) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
-        polynomial.num_variables() == self.mv_parameters.num_variables
+        polynomial.num_variables() == self.num_variables
     }
 
     #[instrument(skip_all)]
@@ -139,8 +139,13 @@ where
         );
 
         // Initialize the round state with inputs and initial polynomial data
-        let mut round_state =
-            RoundState::initialize_first_round_state(self, prover_state, statement, witness, polynomial)?;
+        let mut round_state = RoundState::initialize_first_round_state(
+            self,
+            prover_state,
+            statement,
+            witness,
+            polynomial,
+        )?;
 
         // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
@@ -182,10 +187,7 @@ where
     {
         // Xn PolA + (1 - Xn) PolB
 
-        assert_eq!(
-            polynomial_a.num_variables(),
-            self.mv_parameters.num_variables,
-        );
+        assert_eq!(polynomial_a.num_variables(), self.num_variables,);
         assert!(polynomial_a.num_variables() >= polynomial_b.num_variables());
         // Initialize the round state with inputs and initial polynomial data
         let mut round_state = RoundState::initialize_first_round_state_batch(
@@ -214,7 +216,7 @@ where
         Ok(constraint_eval)
     }
 
-    #[instrument(skip_all, fields(round_number = round_index, log_size = self.mv_parameters.num_variables - self.folding_factor.total_number(round_index)))]
+    #[instrument(skip_all, fields(round_number = round_index, log_size = self.num_variables - self.folding_factor.total_number(round_index)))]
     #[allow(clippy::too_many_lines)]
     fn round<const DIGEST_ELEMS: usize>(
         &self,
@@ -234,8 +236,7 @@ where
         PF<F>: TwoAdicField,
     {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
-        let num_variables =
-            self.mv_parameters.num_variables - self.folding_factor.total_number(round_index);
+        let num_variables = self.num_variables - self.folding_factor.total_number(round_index);
         assert_eq!(num_variables, folded_evaluations.num_variables());
 
         // Base case: final round reached
