@@ -5,14 +5,10 @@ use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
-    PF,
-    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::SumcheckSingle,
-    whir::{
+    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState}, poly::{evals::EvaluationsList, multilinear::MultilinearPoint}, sumcheck::SumcheckSingle, whir::{
         committer::{RoundMerkleTree, Witness},
         statement::Statement,
-    },
+    }, PF
 };
 
 /// Holds all per-round prover state required during the execution of the WHIR protocol.
@@ -77,6 +73,7 @@ where
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         mut statement: Statement<EF>,
         witness: Witness<EF, F, DIGEST_ELEMS>,
+        polynomial: &EvaluationsList<F>,
     ) -> ProofResult<Self>
     where
         Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
@@ -100,7 +97,7 @@ where
         let combination_randomness_gen: EF = prover_state.sample();
 
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
-            &witness.polynomial,
+            polynomial,
             &statement,
             combination_randomness_gen,
             prover_state,
@@ -136,8 +133,10 @@ where
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
         witness_a: Witness<EF, F, DIGEST_ELEMS>,
+        polynomial_a: &EvaluationsList<F>,
         statement_b: Statement<EF>,
         witness_b: Witness<EF, F, DIGEST_ELEMS>,
+        polynomial_b: &EvaluationsList<F>,
     ) -> ProofResult<Self>
     where
         Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
@@ -171,20 +170,20 @@ where
         let combination_randomness_gen: EF = prover_state.sample();
 
         let _span = info_span!("merging 2 batched polynomials", n_vars_a, n_vars_b,).entered();
-        let mut polynomial = F::zero_vec(witness_a.polynomial.num_evals() * 2);
+        let mut polynomial = F::zero_vec(polynomial_a.num_evals() * 2);
         polynomial
             .par_iter_mut()
             .step_by(1 << (1 + n_vars_a - n_vars_b))
             .enumerate()
             .for_each(|(i, eval)| {
-                *eval = witness_b.polynomial.evals()[i];
+                *eval = polynomial_b.evals()[i];
             });
         polynomial[1..]
             .par_iter_mut()
             .step_by(2)
             .enumerate()
             .for_each(|(i, eval)| {
-                *eval = witness_a.polynomial.evals()[i];
+                *eval = polynomial_a.evals()[i];
             });
         std::mem::drop(_span);
 

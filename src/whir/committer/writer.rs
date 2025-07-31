@@ -61,7 +61,7 @@ where
         &self,
         dft: &EvalsDft<PF<F>>,
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
-        polynomial: EvaluationsList<F>,
+        polynomial: &EvaluationsList<F>,
     ) -> ProofResult<Witness<EF, F, DIGEST_ELEMS>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -104,7 +104,6 @@ where
 
         // Return the witness containing the polynomial, Merkle tree, and OOD results.
         Ok(Witness {
-            polynomial,
             prover_data,
             ood_points,
             ood_answers,

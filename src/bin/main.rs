@@ -24,7 +24,7 @@ use whir_p3::{
     },
 };
 
-type F = KoalaBear;
+type F = BinomialExtensionField<KoalaBear, 8>;
 type EF = BinomialExtensionField<KoalaBear, 8>;
 
 type FPrimeSubfield = <F as PrimeCharacteristicRing>::PrimeSubfield;
@@ -130,7 +130,7 @@ fn main() {
 
     let time = Instant::now();
     let witness_a = CommitmentWriter::new(&params_a)
-        .commit(&dft, &mut prover_state, polynomial_a)
+        .commit(&dft, &mut prover_state, &polynomial_a)
         .unwrap();
     let commit_time_a = time.elapsed();
 
@@ -148,6 +148,7 @@ fn main() {
             &mut prover_state,
             statement_a.clone(),
             witness_a,
+            &polynomial_a,
             // statement_b.clone(),
             // witness_b,
         )

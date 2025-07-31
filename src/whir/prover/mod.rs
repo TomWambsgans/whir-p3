@@ -105,9 +105,10 @@ where
     fn validate_witness<const DIGEST_ELEMS: usize>(
         &self,
         witness: &Witness<EF, F, DIGEST_ELEMS>,
+        polynomial: &EvaluationsList<F>,
     ) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
-        witness.polynomial.num_variables() == self.mv_parameters.num_variables
+        polynomial.num_variables() == self.mv_parameters.num_variables
     }
 
     #[instrument(skip_all)]
@@ -117,6 +118,7 @@ where
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement: Statement<EF>,
         witness: Witness<EF, F, DIGEST_ELEMS>,
+        polynomial: &EvaluationsList<F>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -132,13 +134,13 @@ where
         assert!(
             self.validate_parameters()
                 && self.validate_statement(&statement)
-                && self.validate_witness(&witness),
+                && self.validate_witness(&witness, &polynomial),
             "Invalid prover parameters, statement, or witness"
         );
 
         // Initialize the round state with inputs and initial polynomial data
         let mut round_state =
-            RoundState::initialize_first_round_state(self, prover_state, statement, witness)?;
+            RoundState::initialize_first_round_state(self, prover_state, statement, witness, polynomial)?;
 
         // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
@@ -162,8 +164,10 @@ where
         prover_state: &mut ProverState<PF<F>, EF, Challenger>,
         statement_a: Statement<EF>,
         witness_a: Witness<EF, F, DIGEST_ELEMS>,
+        polynomial_a: &EvaluationsList<F>,
         statement_b: Statement<EF>,
         witness_b: Witness<EF, F, DIGEST_ELEMS>,
+        polynomial_b: &EvaluationsList<F>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
@@ -179,18 +183,20 @@ where
         // Xn PolA + (1 - Xn) PolB
 
         assert_eq!(
-            witness_a.polynomial.num_variables(),
+            polynomial_a.num_variables(),
             self.mv_parameters.num_variables,
         );
-        assert!(witness_a.polynomial.num_variables() >= witness_b.polynomial.num_variables());
+        assert!(polynomial_a.num_variables() >= polynomial_b.num_variables());
         // Initialize the round state with inputs and initial polynomial data
         let mut round_state = RoundState::initialize_first_round_state_batch(
             self,
             prover_state,
             statement_a,
             witness_a,
+            polynomial_a,
             statement_b,
             witness_b,
+            polynomial_b,
         )?;
 
         // Run the WHIR protocol round-by-round
