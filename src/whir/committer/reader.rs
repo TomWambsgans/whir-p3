@@ -5,10 +5,7 @@ use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
-    PF,
-    fiat_shamir::{errors::ProofResult, verifier::VerifierState},
-    poly::multilinear::MultilinearPoint,
-    whir::{config::WhirConfig, statement::constraint::Constraint},
+    fiat_shamir::{errors::ProofResult, verifier::VerifierState, WhirFS}, poly::multilinear::MultilinearPoint, whir::{config::WhirConfig, statement::constraint::Constraint}, PF
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -120,27 +117,26 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
 /// The `CommitmentReader` wraps the WHIR configuration and provides a convenient
 /// method to extract a `ParsedCommitment` by reading values from the Fiat-Shamir transcript.
 #[derive(Debug)]
-pub struct CommitmentReader<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
+pub struct CommitmentReader<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     /// Reference to the verifier’s configuration object.
     ///
     /// This contains all parameters needed to parse the commitment,
     /// including how many out-of-domain samples are expected.
-    &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
+    &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> CommitmentReader<'a, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentReader<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>
 {
     /// Create a new commitment reader from a WHIR configuration.
     ///
     /// This allows the verifier to parse a commitment from the Fiat-Shamir transcript.
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
         Self(params)
     }
 
@@ -150,7 +146,7 @@ where
     /// expected for verifying the committed polynomial.
     pub fn parse_commitment(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
     ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>> {
         ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
             verifier_state,
@@ -160,12 +156,12 @@ where
     }
 }
 
-impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for CommitmentReader<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for CommitmentReader<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
+    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0

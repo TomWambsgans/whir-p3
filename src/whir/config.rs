@@ -181,7 +181,7 @@ pub struct RoundConfig<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct WhirConfig<F, EF, Hash, C, Challenger, const DIGEST_ELEMS: usize>
+pub struct WhirConfig<F, EF, Hash, C,  const DIGEST_ELEMS: usize>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -211,12 +211,10 @@ where
 
     pub _base_field: PhantomData<F>,
     pub _extension_field: PhantomData<EF>,
-    pub _challenger: PhantomData<Challenger>,
     pub _digest_elems: PhantomData<[F; DIGEST_ELEMS]>,
 }
 
-impl<F, EF, Hash, C, Challenger, const DIGEST_ELEMS: usize>
-    WhirConfig<F, EF, Hash, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, Hash, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, Hash, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -378,7 +376,6 @@ where
             merkle_compress: whir_parameters.merkle_compress,
             _base_field: PhantomData,
             _extension_field: PhantomData,
-            _challenger: PhantomData,
             _digest_elems: PhantomData,
         }
     }
@@ -597,8 +594,8 @@ where
     }
 }
 
-impl<F, EF, Hash, C, Challenger, const DIGEST_ELEMS: usize> ToString
-    for WhirConfig<F, EF, Hash, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, Hash, C, const DIGEST_ELEMS: usize> ToString
+    for WhirConfig<F, EF, Hash, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,

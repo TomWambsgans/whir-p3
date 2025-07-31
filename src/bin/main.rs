@@ -77,7 +77,7 @@ fn main() {
     // whir_params_b.folding_factor = FoldingFactor::Constant(4 - vars_diff);
 
     let params_a =
-        WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger, 8>::new(whir_params_a);
+        WhirConfig::<F, EF, MerkleHash, MerkleCompress, 8>::new(whir_params_a);
     // let params_b = WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger>::new(
     //     mv_params_b,
     //     whir_params_b,

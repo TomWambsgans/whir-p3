@@ -1,6 +1,5 @@
 use std::ops::Deref;
 
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -11,12 +10,7 @@ use tracing::{info_span, instrument};
 
 use super::Witness;
 use crate::{
-    PF, PFPacking,
-    dft::EvalsDft,
-    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
-    poly::evals::EvaluationsList,
-    utils::parallel_repeat,
-    whir::{config::WhirConfig, utils::sample_ood_points},
+    dft::EvalsDft, fiat_shamir::{errors::ProofResult, prover::ProverState,  WhirFS}, poly::evals::EvaluationsList, utils::parallel_repeat, whir::{config::WhirConfig, utils::sample_ood_points}, PFPacking, PF
 };
 
 /// Responsible for committing polynomials using a Merkle-based scheme.
@@ -26,24 +20,23 @@ use crate::{
 ///
 /// It provides a commitment that can be used for proof generation and verification.
 #[derive(Debug)]
-pub struct CommitmentWriter<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
+pub struct CommitmentWriter<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     /// Reference to the WHIR protocol configuration.
-    &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
+    &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> CommitmentWriter<'a, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentWriter<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<PF<F>>,
     PF<F>: TwoAdicField,
     F: ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     /// Create a new writer that borrows the WHIR protocol configuration.
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
         Self(params)
     }
 
@@ -60,7 +53,7 @@ where
     pub fn commit(
         &self,
         dft: &EvalsDft<PF<F>>,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF,impl WhirFS<F>>,
         polynomial: &EvaluationsList<F>,
     ) -> ProofResult<Witness<F, EF, DIGEST_ELEMS>>
     where
@@ -111,12 +104,12 @@ where
     }
 }
 
-impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for CommitmentWriter<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for CommitmentWriter<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
+    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0

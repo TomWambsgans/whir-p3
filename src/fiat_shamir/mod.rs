@@ -1,3 +1,8 @@
+use p3_challenger::{FieldChallenger, GrindingChallenger};
+use p3_field::Field;
+
+use crate::{PF, fiat_shamir::verifier::ChallengerState};
+
 pub mod errors;
 pub mod pattern;
 pub mod prover;
@@ -18,4 +23,14 @@ pub trait BitsSampler<F> {
     /// # Returns
     /// A `usize` value uniformly sampled from the range `0..2^bits`, derived from the transcript state.
     fn sample_bits(&mut self, bits: usize) -> usize;
+}
+
+pub trait WhirFS<F: Field>:
+    FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState
+{
+}
+
+impl<F: Field, C: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState>
+    WhirFS<F> for C
+{
 }

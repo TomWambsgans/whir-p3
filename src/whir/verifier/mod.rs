@@ -1,6 +1,5 @@
 use std::{fmt::Debug, ops::Deref};
 
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
@@ -14,18 +13,14 @@ use super::{
     utils::get_challenge_stir_queries,
 };
 use crate::{
-    PF,
     fiat_shamir::{
         errors::{ProofError, ProofResult},
-        verifier::{ChallengerState, VerifierState},
-    },
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    utils::pack_scalars_to_extension,
-    whir::{
+        verifier::{ VerifierState}, WhirFS,
+    }, poly::{evals::EvaluationsList, multilinear::MultilinearPoint}, utils::pack_scalars_to_extension, whir::{
         config::{RoundConfig, WhirConfig},
         statement::Statement,
         verifier::sumcheck::verify_sumcheck_rounds,
-    },
+    }, PF
 };
 
 pub mod sumcheck;
@@ -35,22 +30,22 @@ pub mod sumcheck;
 /// This type provides a lightweight, ergonomic interface to verification methods
 /// by wrapping a reference to the `WhirConfig`.
 #[derive(Debug)]
-pub struct Verifier<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
+pub struct Verifier<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     /// Reference to the verifier’s configuration containing all round parameters.
-    pub(crate) &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
+    pub(crate) &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Verifier<'a, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> Verifier<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
-    F: ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
+    F: ExtensionField<PF<F>>
+    
 {
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>) -> Self {
+    pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
         Self(params)
     }
 
@@ -58,7 +53,7 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn batch_verify(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
         parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement_a: &Statement<EF>,
         parsed_commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -71,6 +66,7 @@ where
         C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
             + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
             + Sync,
+            
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // During the rounds we collect constraints, combination randomness, folding randomness
@@ -226,7 +222,7 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn verify(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
         parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement: &Statement<EF>,
     ) -> ProofResult<MultilinearPoint<EF>>
@@ -377,7 +373,7 @@ where
     /// A vector of randomness values used to weight each constraint.
     pub fn combine_constraints(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
         claimed_sum: &mut EF,
         constraints: &[Constraint<EF>],
     ) -> ProofResult<Vec<EF>> {
@@ -421,7 +417,7 @@ where
     /// or the prover’s data does not match the commitment.
     pub fn verify_stir_challenges(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
         params: &RoundConfig<F>,
         commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
@@ -501,7 +497,7 @@ where
 
     pub fn verify_stir_challenges_batched(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
         params: &RoundConfig<F>,
         commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -519,20 +515,6 @@ where
     {
         let leafs_base_field = round_index == 0;
 
-        // CRITICAL: Verify the prover's proof-of-work before generating challenges.
-        //
-        // This is the verifier's counterpart to the prover's grinding step and is essential
-        // for protocol soundness.
-        //
-        // The query locations (`stir_challenges_indexes`) we are about to generate are derived
-        // from the transcript, which includes the prover's commitment for this round. To prevent
-        // a malicious prover from repeatedly trying different commitments until they find one that
-        // produces "easy" queries, the protocol forces the prover to perform an expensive
-        // proof-of-work (grinding) after they commit.
-        //
-        // By verifying that proof-of-work *now*, we confirm that the prover "locked in" their
-        // commitment at a significant computational cost. This gives us confidence that the
-        // challenges we generate are unpredictable and unbiased by a cheating prover.
         verifier_state.check_pow_grinding(params.pow_bits)?;
 
         let stir_challenges_indexes = get_challenge_stir_queries(
@@ -611,32 +593,9 @@ where
         Ok(stir_constraints)
     }
 
-    /// Verify a Merkle multi-opening proof for the provided indices.
-    ///
-    /// This method checks that the prover’s claimed leaf values at multiple positions
-    /// match the committed Merkle root, using batch Merkle proofs.
-    /// It supports both base field and extension field leaf types.
-    ///
-    /// For each queried index:
-    /// - It reads the claimed leaf values and associated Merkle proof from the transcript.
-    /// - It verifies the Merkle opening against the provided root and dimensions.
-    /// - If verification passes, it collects and returns the decoded leaf values.
-    ///
-    /// # Arguments
-    /// - `verifier_state`: The verifier’s Fiat-Shamir transcript state.
-    /// - `root`: The Merkle root hash the prover’s claims are verified against.
-    /// - `indices`: The list of queried leaf indices.
-    /// - `dimensions`: The shape of the underlying matrix being committed (for MMCS verification).
-    /// - `leafs_base_field`: Indicates whether leafs are in the base field (`F`) or extension field (`EF`).
-    ///
-    /// # Returns
-    /// A vector of decoded leaf values, one `Vec<EF>` per queried index.
-    ///
-    /// # Errors
-    /// Returns `ProofError::InvalidProof` if any Merkle proof fails verification.
     pub fn verify_merkle_proof(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
         root: &Hash<PF<F>, PF<F>, DIGEST_ELEMS>,
         indices: &[usize],
         dimensions: &[Dimensions],
@@ -804,12 +763,12 @@ where
     }
 }
 
-impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for Verifier<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for Verifier<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
+    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0

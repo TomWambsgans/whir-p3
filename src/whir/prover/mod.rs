@@ -1,6 +1,5 @@
 use std::ops::Deref;
 
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
@@ -13,15 +12,10 @@ use tracing::{info_span, instrument};
 
 use super::{committer::Witness, statement::Statement};
 use crate::{
-    PF, PFPacking,
-    dft::EvalsDft,
-    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    utils::{flatten_scalars_to_base, parallel_repeat},
-    whir::{
+    dft::EvalsDft, fiat_shamir::{errors::ProofResult, prover::ProverState, WhirFS}, poly::{evals::EvaluationsList, multilinear::MultilinearPoint}, utils::{flatten_scalars_to_base, parallel_repeat}, whir::{
         config::{RoundConfig, WhirConfig},
         utils::{get_challenge_stir_queries, sample_ood_points},
-    },
+    }, PFPacking, PF
 };
 
 pub mod round;
@@ -30,33 +24,32 @@ pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
 pub type Leafs<F> = Vec<Vec<F>>;
 
 #[derive(Debug)]
-pub struct Prover<'a, F, EF, H, C, Challenger, const DIGEST_ELEMS: usize>(
+pub struct Prover<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     /// Reference to the protocol configuration shared across prover components.
-    pub &'a WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>,
+    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Deref for Prover<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for Prover<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type Target = WhirConfig<F, EF, H, C, Challenger, DIGEST_ELEMS>;
+    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
 
     fn deref(&self) -> &Self::Target {
         self.0
     }
 }
 
-impl<F, EF, H, C, Challenger, const DIGEST_ELEMS: usize> Prover<'_, F, EF, H, C, Challenger, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Prover<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
     F: ExtensionField<PF<F>>,
     EF: ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
 {
     /// Validates that the total number of variables expected by the prover configuration
     /// matches the number implied by the folding schedule and the final rounds.
@@ -115,7 +108,7 @@ where
     pub fn prove(
         &self,
         dft: &EvalsDft<PF<F>>,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
@@ -166,7 +159,7 @@ where
     pub fn batch_prove(
         &self,
         dft: &EvalsDft<PF<F>>,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,
@@ -222,7 +215,7 @@ where
         &self,
         round_index: usize,
         dft: &EvalsDft<PF<F>>,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
@@ -502,7 +495,7 @@ where
     fn final_round(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
@@ -622,7 +615,7 @@ where
     #[allow(clippy::type_complexity)]
     fn compute_stir_queries(
         &self,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         round_state: &RoundState<F, EF, DIGEST_ELEMS>,
         num_variables: usize,
         round_params: &RoundConfig<F>,

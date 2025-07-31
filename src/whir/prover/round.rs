@@ -1,4 +1,3 @@
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, TwoAdicField};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use tracing::{info_span, instrument};
@@ -6,7 +5,7 @@ use tracing::{info_span, instrument};
 use super::Prover;
 use crate::{
     PF,
-    fiat_shamir::{errors::ProofResult, prover::ProverState, verifier::ChallengerState},
+    fiat_shamir::{WhirFS, errors::ProofResult, prover::ProverState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     sumcheck::SumcheckSingle,
     whir::{
@@ -72,16 +71,13 @@ where
     EF: ExtensionField<PF<F>>,
 {
     #[instrument(skip_all)]
-    pub(crate) fn initialize_first_round_state<MyChallenger, C, Challenger>(
-        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger, DIGEST_ELEMS>,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+    pub(crate) fn initialize_first_round_state<MyChallenger, C>(
+        prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         mut statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
-    ) -> ProofResult<Self>
-    where
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
-    {
+    ) -> ProofResult<Self> {
         // Convert witness ood_points into constraints
         let new_constraints = witness
             .ood_points
@@ -129,19 +125,16 @@ where
     }
 
     #[instrument(skip_all)]
-    pub(crate) fn initialize_first_round_state_batch<MyChallenger, C, Challenger>(
-        prover: &Prover<'_, F, EF, MyChallenger, C, Challenger, DIGEST_ELEMS>,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+    pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
+        prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
+        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,
         statement_b: Statement<EF>,
         witness_b: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_b: &EvaluationsList<F>,
-    ) -> ProofResult<Self>
-    where
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState,
-    {
+    ) -> ProofResult<Self> {
         let n_vars_a = statement_a.num_variables();
         let n_vars_b = statement_b.num_variables();
 
