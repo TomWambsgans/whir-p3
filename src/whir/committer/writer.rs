@@ -25,26 +25,21 @@ use crate::{
 ///
 /// It provides a commitment that can be used for proof generation and verification.
 #[derive(Debug)]
-pub struct CommitmentWriter<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
+pub struct Commiter<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     /// Reference to the WHIR protocol configuration.
-    &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
+    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
     EF: ExtensionField<F>;
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentWriter<'a, F, EF, H, C, DIGEST_ELEMS>
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> Commiter<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<PF<EF>>,
     PF<EF>: TwoAdicField,
     F: ExtensionField<PF<EF>>,
 {
-    /// Create a new writer that borrows the WHIR protocol configuration.
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
-        Self(params)
-    }
-
     /// Commits a polynomial using a Merkle-based commitment scheme.
     ///
     /// This function:
@@ -110,7 +105,7 @@ where
 }
 
 impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref
-    for CommitmentWriter<'_, F, EF, H, C, DIGEST_ELEMS>
+    for Commiter<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,

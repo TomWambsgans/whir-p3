@@ -12,7 +12,7 @@ use whir_p3::{
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::{
-        committer::{reader::CommitmentReader, writer::CommitmentWriter},
+        committer::{reader::CommitmentReader, writer::Commiter},
         config::{
             DEFAULT_MAX_POW, FoldingFactor, SecurityAssumption, WhirConfig, WhirConfigBuilder,
         },
@@ -124,7 +124,7 @@ fn main() {
     let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
     let time = Instant::now();
-    let witness_a = CommitmentWriter::new(&params_a)
+    let witness_a = Commiter(&params_a)
         .commit(&dft, &mut prover_state, &polynomial_a)
         .unwrap();
     let commit_time_a = time.elapsed();
@@ -154,7 +154,7 @@ fn main() {
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
-    let parsed_commitment_a = CommitmentReader::new(&params_a)
+    let parsed_commitment_a = CommitmentReader(&params_a)
         .parse_commitment(&mut verifier_state)
         .unwrap();
     // let parsed_commitment_b = CommitmentReader::new(&params_b)
@@ -162,7 +162,7 @@ fn main() {
     //     .unwrap();
 
     let verif_time = Instant::now();
-    Verifier::new(&params_a)
+    Verifier(&params_a)
         .verify(
             &mut verifier_state,
             &parsed_commitment_a,

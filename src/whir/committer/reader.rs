@@ -126,7 +126,7 @@ pub struct CommitmentReader<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     ///
     /// This contains all parameters needed to parse the commitment,
     /// including how many out-of-domain samples are expected.
-    &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
+    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
@@ -137,13 +137,6 @@ where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
 {
-    /// Create a new commitment reader from a WHIR configuration.
-    ///
-    /// This allows the verifier to parse a commitment from the Fiat-Shamir transcript.
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
-        Self(params)
-    }
-
     /// Parse a commitment from the verifier's transcript state.
     ///
     /// Reads the Merkle root and out-of-domain (OOD) challenge points and answers

@@ -37,7 +37,7 @@ pub mod sumcheck;
 #[derive(Debug)]
 pub struct Verifier<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
     /// Reference to the verifier’s configuration containing all round parameters.
-    pub(crate) &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
+    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
 )
 where
     F: Field,
@@ -49,10 +49,6 @@ where
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
     F: ExtensionField<PF<EF>>,
 {
-    pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
-        Self(params)
-    }
-
     #[instrument(skip_all)]
     #[allow(clippy::too_many_lines)]
     pub fn batch_verify(
