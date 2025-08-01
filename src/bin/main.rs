@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{marker::PhantomData, time::Instant};
 
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField};
@@ -70,6 +70,8 @@ fn main() {
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 3,
+        base_field: PhantomData::<F>,
+        extension_field: PhantomData::<EF>,
     };
 
     // let mut whir_params_b = whir_params_a.clone();

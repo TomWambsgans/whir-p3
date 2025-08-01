@@ -142,7 +142,7 @@ impl FoldingFactor {
 
 /// Configuration parameters for WHIR proofs.
 #[derive(Clone, Debug)]
-pub struct WhirConfigBuilder<H, C> {
+pub struct WhirConfigBuilder<F, EF, H, C, const DIGEST_ELEMS: usize> {
     /// The logarithmic inverse rate for sampling.
     pub starting_log_inv_rate: usize,
     pub max_num_variables_to_send_coeffs: usize,
@@ -160,9 +160,9 @@ pub struct WhirConfigBuilder<H, C> {
     pub security_level: usize,
     /// The number of bits required for proof-of-work (PoW).
     pub pow_bits: usize,
-    /// Hash used in the Merkle tree.
+    pub base_field: PhantomData<F>,
+    pub extension_field: PhantomData<EF>,
     pub merkle_hash: H,
-    /// Compression method used in the Merkle tree.
     pub merkle_compress: C,
 }
 
@@ -213,13 +213,13 @@ where
     pub _digest_elems: PhantomData<[F; DIGEST_ELEMS]>,
 }
 
-impl<F, EF, Hash, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, Hash, C, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(whir_parameters: WhirConfigBuilder<Hash, C>, num_variables: usize) -> Self {
+    pub fn new(whir_parameters: WhirConfigBuilder<F, EF, H, C, DIGEST_ELEMS>, num_variables: usize) -> Self {
         whir_parameters
             .folding_factor
             .check_validity(num_variables)
@@ -629,21 +629,6 @@ where
         s += &format!("Final Folding PoW Bits: {}\n", self.final_folding_pow_bits);
         s += &format!("Final Log Inverse Rate: {}\n", self.final_log_inv_rate);
         s
-    }
-}
-
-impl<H, C> Display for WhirConfigBuilder<H, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
-            f,
-            "Targeting {}-bits of security with {}-bits of PoW - soundness: {:?}",
-            self.security_level, self.pow_bits, self.soundness_type
-        )?;
-        writeln!(
-            f,
-            "Starting rate: 2^-{}, folding_factor: {:?}",
-            self.starting_log_inv_rate, self.folding_factor,
-        )
     }
 }
 
