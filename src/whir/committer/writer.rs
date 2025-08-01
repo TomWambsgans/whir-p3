@@ -12,7 +12,7 @@ use super::Witness;
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
-    fiat_shamir::{WhirFS, errors::ProofResult, prover::ProverState},
+    fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
     poly::evals::EvaluationsList,
     utils::parallel_repeat,
     whir::{config::WhirConfig, utils::sample_ood_points},
@@ -58,7 +58,7 @@ where
     pub fn commit(
         &self,
         dft: &EvalsDft<PF<EF>>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         polynomial: &EvaluationsList<F>,
     ) -> ProofResult<Witness<F, EF, DIGEST_ELEMS>>
     where

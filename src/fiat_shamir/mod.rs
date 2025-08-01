@@ -25,12 +25,12 @@ pub trait BitsSampler<F> {
     fn sample_bits(&mut self, bits: usize) -> usize;
 }
 
-pub trait WhirFS<EF: Field>:
+pub trait FSChallenger<EF: Field>:
     FieldChallenger<PF<EF>> + GrindingChallenger<Witness = PF<EF>> + ChallengerState
 {
 }
 
 impl<F: Field, C: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState>
-    WhirFS<F> for C
+    FSChallenger<F> for C
 {
 }

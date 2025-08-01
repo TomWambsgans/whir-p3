@@ -15,7 +15,7 @@ use super::{
 use crate::{
     PF,
     fiat_shamir::{
-        WhirFS,
+        FSChallenger,
         errors::{ProofError, ProofResult},
         verifier::VerifierState,
     },
@@ -57,7 +57,7 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn batch_verify(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
         parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement_a: &Statement<EF>,
         parsed_commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -225,7 +225,7 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn verify(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
         parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement: &Statement<EF>,
     ) -> ProofResult<MultilinearPoint<EF>>
@@ -376,7 +376,7 @@ where
     /// A vector of randomness values used to weight each constraint.
     pub fn combine_constraints(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
         claimed_sum: &mut EF,
         constraints: &[Constraint<EF>],
     ) -> ProofResult<Vec<EF>> {
@@ -420,7 +420,7 @@ where
     /// or the prover’s data does not match the commitment.
     pub fn verify_stir_challenges(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
         params: &RoundConfig<F>,
         commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
@@ -500,7 +500,7 @@ where
 
     pub fn verify_stir_challenges_batched(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
         params: &RoundConfig<F>,
         commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
@@ -598,7 +598,7 @@ where
 
     pub fn verify_merkle_proof(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
         root: &Hash<PF<F>, PF<F>, DIGEST_ELEMS>,
         indices: &[usize],
         dimensions: &[Dimensions],

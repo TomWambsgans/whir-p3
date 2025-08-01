@@ -6,7 +6,7 @@ use p3_symmetric::Hash;
 
 use crate::{
     PF,
-    fiat_shamir::{WhirFS, errors::ProofResult, verifier::VerifierState},
+    fiat_shamir::{FSChallenger, errors::ProofResult, verifier::VerifierState},
     poly::multilinear::MultilinearPoint,
     whir::{config::WhirConfig, statement::constraint::Constraint},
 };
@@ -149,7 +149,7 @@ where
     /// expected for verifying the committed polynomial.
     pub fn parse_commitment(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl WhirFS<F>>,
+        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
     ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>> {
         ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
             verifier_state,

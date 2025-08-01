@@ -5,7 +5,7 @@ use tracing::{info_span, instrument};
 use super::Prover;
 use crate::{
     PF,
-    fiat_shamir::{WhirFS, errors::ProofResult, prover::ProverState},
+    fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     sumcheck::SumcheckSingle,
     whir::{
@@ -73,7 +73,7 @@ where
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         mut statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
@@ -127,7 +127,7 @@ where
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,

@@ -4,7 +4,7 @@ use tracing::instrument;
 
 use crate::{
     PF,
-    fiat_shamir::{WhirFS, prover::ProverState},
+    fiat_shamir::{FSChallenger, prover::ProverState},
     poly::{dense::WhirDensePolynomial, evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::statement::Statement,
 };
@@ -54,7 +54,7 @@ pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
 }
 
 fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
-    prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
     evals: &EvaluationsList<F>,
     weights: &mut EvaluationsList<EF>,
     sum: &mut EF,
@@ -94,7 +94,7 @@ fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
 /// ## Returns
 /// The verifier's challenge `r` as an `EF` element.
 fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
-    prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
     evals: &mut EvaluationsList<EF>,
     weights: &mut EvaluationsList<EF>,
     sum: &mut EF,
@@ -201,7 +201,7 @@ where
         statement: &Statement<EF>,
         combination_randomness: EF,
 
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         pow_bits: usize,
     ) -> (Self, MultilinearPoint<EF>)
@@ -273,7 +273,7 @@ where
     #[instrument(skip_all)]
     pub fn compute_sumcheck_polynomials(
         &mut self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         pow_bits: usize,
     ) -> MultilinearPoint<EF>

@@ -14,7 +14,7 @@ use super::{committer::Witness, statement::Statement};
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
-    fiat_shamir::{WhirFS, errors::ProofResult, prover::ProverState},
+    fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     utils::{flatten_scalars_to_base, parallel_repeat},
     whir::{
@@ -113,7 +113,7 @@ where
     pub fn prove(
         &self,
         dft: &EvalsDft<PF<EF>>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
@@ -164,7 +164,7 @@ where
     pub fn batch_prove(
         &self,
         dft: &EvalsDft<PF<EF>>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,
@@ -220,7 +220,7 @@ where
         &self,
         round_index: usize,
         dft: &EvalsDft<PF<EF>>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
@@ -500,7 +500,7 @@ where
     fn final_round(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
     ) -> ProofResult<()>
     where
@@ -620,7 +620,7 @@ where
     #[allow(clippy::type_complexity)]
     fn compute_stir_queries(
         &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &RoundState<F, EF, DIGEST_ELEMS>,
         num_variables: usize,
         round_params: &RoundConfig<F>,
