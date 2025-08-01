@@ -1,7 +1,6 @@
-use std::{fmt::Debug, ops::Deref};
+use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
-use p3_challenger::{FieldChallenger, GrindingChallenger};
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
@@ -16,14 +15,14 @@ use crate::{
 /// This includes the Merkle root of the committed table and any out-of-domain (OOD)
 /// query points and their corresponding answers, which are required for verifier checks.
 #[derive(Debug, Clone)]
-pub struct ParsedCommitment<F: PrimeCharacteristicRing, EF, const DIGEST_ELEMS: usize> {
+pub struct ParsedCommitment<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize> {
     /// Number of variables in the committed polynomial.
     pub num_variables: usize,
 
     /// Merkle root of the committed evaluation table.
     ///
     /// This hash is used by the verifier to check Merkle proofs of queried evaluations.
-    pub root: Hash<PF<F>, PF<F>, DIGEST_ELEMS>,
+    pub root: Hash<PF<EF>, PF<EF>, DIGEST_ELEMS>,
 
     /// Points queried by the verifier outside the low-degree evaluation domain.
     ///
@@ -32,6 +31,8 @@ pub struct ParsedCommitment<F: PrimeCharacteristicRing, EF, const DIGEST_ELEMS: 
 
     /// Answers (evaluations) of the committed polynomial at the corresponding `ood_points`.
     pub ood_answers: Vec<EF>,
+
+    pub base_field: PhantomData<F>,
 }
 
 impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
@@ -58,16 +59,15 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
     /// - The prover's claimed answers at those points.
     ///
     /// This is used to verify consistency of polynomial commitments in WHIR.
-    pub fn parse<Challenger>(
-        verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+    pub fn parse(
+        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         num_variables: usize,
         ood_samples: usize,
     ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>>
     where
         F: TwoAdicField,
         EF: ExtensionField<F> + TwoAdicField,
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
-        EF: ExtensionField<PF<F>>,
+        EF: ExtensionField<PF<EF>>,
     {
         // Read the Merkle root hash committed by the prover.
         let root = verifier_state
@@ -95,6 +95,7 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
             root,
             ood_points,
             ood_answers,
+            base_field: PhantomData,
         })
     }
 
@@ -134,7 +135,7 @@ where
 impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentReader<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
 {
     /// Create a new commitment reader from a WHIR configuration.
     ///
@@ -149,7 +150,7 @@ where
     /// expected for verifying the committed polynomial.
     pub fn parse_commitment(
         &self,
-        verifier_state: &mut VerifierState<PF<F>, EF, impl FSChallenger<F>>,
+        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
     ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>> {
         ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
             verifier_state,

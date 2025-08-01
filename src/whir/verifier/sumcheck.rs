@@ -1,9 +1,9 @@
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, TwoAdicField};
 
 use crate::{
     PF,
     fiat_shamir::{
+        FSChallenger,
         errors::{ProofError, ProofResult},
         verifier::VerifierState,
     },
@@ -41,16 +41,15 @@ type SumcheckRandomness<F> = MultilinearPoint<F>;
 /// # Returns
 ///
 /// - A `MultilinearPoint` of folding randomness values in reverse order.
-pub(crate) fn verify_sumcheck_rounds<F, EF, Challenger>(
-    verifier_state: &mut VerifierState<PF<F>, EF, Challenger>,
+pub(crate) fn verify_sumcheck_rounds<F, EF>(
+    verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
     claimed_sum: &mut EF,
     rounds: usize,
     pow_bits: usize,
 ) -> ProofResult<SumcheckRandomness<EF>>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
 {
     // Preallocate vector to hold the randomness values
     let mut randomness = Vec::with_capacity(rounds);
