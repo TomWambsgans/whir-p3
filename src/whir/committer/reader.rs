@@ -5,7 +5,10 @@ use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
-    fiat_shamir::{errors::ProofResult, verifier::VerifierState, WhirFS}, poly::multilinear::MultilinearPoint, whir::{config::WhirConfig, statement::constraint::Constraint}, PF
+    PF,
+    fiat_shamir::{WhirFS, errors::ProofResult, verifier::VerifierState},
+    poly::multilinear::MultilinearPoint,
+    whir::{config::WhirConfig, statement::constraint::Constraint},
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -131,7 +134,7 @@ where
 impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentReader<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>
+    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
 {
     /// Create a new commitment reader from a WHIR configuration.
     ///
@@ -156,7 +159,8 @@ where
     }
 }
 
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for CommitmentReader<'_, F, EF, H, C, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref
+    for CommitmentReader<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,

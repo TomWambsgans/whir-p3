@@ -1,10 +1,9 @@
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 use tracing::instrument;
 
 use crate::{
     PF,
-    fiat_shamir::{BitsSampler, prover::ProverState},
+    fiat_shamir::{BitsSampler, WhirFS, prover::ProverState},
     poly::multilinear::MultilinearPoint,
 };
 
@@ -48,16 +47,15 @@ pub fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
 ///
 /// This should be used on the prover side.
 #[instrument(skip_all)]
-pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E, Challenger>(
-    prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E>(
+    prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
     num_samples: usize,
     num_variables: usize,
     evaluate_fn: E,
 ) -> (Vec<EF>, Vec<EF>)
 where
     E: Fn(&MultilinearPoint<EF>) -> EF,
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
-    EF: ExtensionField<PF<F>>,
+    EF: ExtensionField<PF<EF>>,
 {
     let mut ood_points = EF::zero_vec(num_samples);
     let mut ood_answers = Vec::with_capacity(num_samples);

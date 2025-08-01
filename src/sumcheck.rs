@@ -1,11 +1,10 @@
-use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use rayon::prelude::*;
 use tracing::instrument;
 
 use crate::{
     PF,
-    fiat_shamir::prover::ProverState,
+    fiat_shamir::{WhirFS, prover::ProverState},
     poly::{dense::WhirDensePolynomial, evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::statement::Statement,
 };
@@ -54,16 +53,13 @@ pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
     }
 }
 
-fn initial_round<Challenger, F: Field, EF: ExtensionField<F> + ExtensionField<PF<F>>>(
-    prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
+    prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
     evals: &EvaluationsList<F>,
     weights: &mut EvaluationsList<EF>,
     sum: &mut EF,
     pow_bits: usize,
-) -> (EF, EvaluationsList<EF>)
-where
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
-{
+) -> (EF, EvaluationsList<EF>) {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
@@ -97,16 +93,13 @@ where
 ///
 /// ## Returns
 /// The verifier's challenge `r` as an `EF` element.
-fn round<Challenger, F: Field, EF: ExtensionField<F> + ExtensionField<PF<F>>>(
-    prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
+    prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
     evals: &mut EvaluationsList<EF>,
     weights: &mut EvaluationsList<EF>,
     sum: &mut EF,
     pow_bits: usize,
-) -> EF
-where
-    Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
-{
+) -> EF {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
@@ -203,32 +196,33 @@ where
     EF: ExtensionField<F>,
 {
     #[instrument(skip_all)]
-    pub fn from_base_evals<Challenger>(
+    pub fn from_base_evals(
         evals: &EvaluationsList<F>,
         statement: &Statement<EF>,
         combination_randomness: EF,
 
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
         folding_factor: usize,
         pow_bits: usize,
     ) -> (Self, MultilinearPoint<EF>)
     where
         F: TwoAdicField,
-        EF: TwoAdicField + ExtensionField<PF<F>>,
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
+        EF: TwoAdicField + ExtensionField<PF<EF>>,
     {
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
 
-        let (mut weights, mut sum) = statement.combine::<PF<F>>(combination_randomness);
+        let (mut weights, mut sum) = statement.combine::<PF<EF>>(combination_randomness);
         // In the first round base field evaluations are folded into extension field elements
         let (r, mut evals) = initial_round(prover_state, evals, &mut weights, &mut sum, pow_bits);
         res.push(r);
 
         // Apply rest of sumcheck rounds
-        res.extend((1..folding_factor).map(|_| {
-            round::<_, F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)
-        }));
+        res.extend(
+            (1..folding_factor).map(|_| {
+                round::<F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)
+            }),
+        );
 
         res.reverse();
 
@@ -277,21 +271,20 @@ where
     }
 
     #[instrument(skip_all)]
-    pub fn compute_sumcheck_polynomials<Challenger>(
+    pub fn compute_sumcheck_polynomials(
         &mut self,
-        prover_state: &mut ProverState<PF<F>, EF, Challenger>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
         folding_factor: usize,
         pow_bits: usize,
     ) -> MultilinearPoint<EF>
     where
         F: TwoAdicField,
         EF: TwoAdicField,
-        Challenger: FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>>,
-        EF: ExtensionField<PF<F>>,
+        EF: ExtensionField<PF<EF>>,
     {
         let mut res = (0..folding_factor)
             .map(|_| {
-                round::<_, F, EF>(
+                round::<F, EF>(
                     prover_state,
                     &mut self.evals,
                     &mut self.weights,

@@ -10,7 +10,12 @@ use tracing::{info_span, instrument};
 
 use super::Witness;
 use crate::{
-    dft::EvalsDft, fiat_shamir::{errors::ProofResult, prover::ProverState,  WhirFS}, poly::evals::EvaluationsList, utils::parallel_repeat, whir::{config::WhirConfig, utils::sample_ood_points}, PFPacking, PF
+    PF, PFPacking,
+    dft::EvalsDft,
+    fiat_shamir::{WhirFS, errors::ProofResult, prover::ProverState},
+    poly::evals::EvaluationsList,
+    utils::parallel_repeat,
+    whir::{config::WhirConfig, utils::sample_ood_points},
 };
 
 /// Responsible for committing polynomials using a Merkle-based scheme.
@@ -31,9 +36,9 @@ where
 impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentWriter<'a, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<PF<F>>,
-    PF<F>: TwoAdicField,
-    F: ExtensionField<PF<F>>,
+    EF: ExtensionField<F> + ExtensionField<PF<EF>>,
+    PF<EF>: TwoAdicField,
+    F: ExtensionField<PF<EF>>,
 {
     /// Create a new writer that borrows the WHIR protocol configuration.
     pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
@@ -52,18 +57,18 @@ where
     #[instrument(skip_all)]
     pub fn commit(
         &self,
-        dft: &EvalsDft<PF<F>>,
-        prover_state: &mut ProverState<PF<F>, EF,impl WhirFS<F>>,
+        dft: &EvalsDft<PF<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
         polynomial: &EvaluationsList<F>,
     ) -> ProofResult<Witness<F, EF, DIGEST_ELEMS>>
     where
-        H: CryptographicHasher<PF<F>, [PF<F>; DIGEST_ELEMS]>
-            + CryptographicHasher<PFPacking<F>, [PFPacking<F>; DIGEST_ELEMS]>
+        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
             + Sync,
-        C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PFPacking<F>; DIGEST_ELEMS], 2>
+        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
             + Sync,
-        [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let evals_repeated = info_span!("repeating evals")
             .in_scope(|| parallel_repeat(polynomial.evals(), 1 << self.starting_log_inv_rate));
@@ -77,18 +82,18 @@ where
             });
 
         // Commit to the Merkle tree
-        let mmcs = MerkleTreeMmcs::<PFPacking<F>, PFPacking<F>, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
-        let extension_mmcs_f = ExtensionMmcs::<PF<F>, F, _>::new(mmcs.clone());
+        let extension_mmcs_f = ExtensionMmcs::<PF<EF>, F, _>::new(mmcs.clone());
         let (root, prover_data) =
             info_span!("commit matrix").in_scope(|| extension_mmcs_f.commit_matrix(folded_matrix));
 
         prover_state.add_base_scalars(root.as_ref());
 
         // Handle OOD (Out-Of-Domain) samples
-        let (ood_points, ood_answers) = sample_ood_points::<F, EF, _, _>(
+        let (ood_points, ood_answers) = sample_ood_points::<F, EF, _>(
             prover_state,
             self.committment_ood_samples,
             self.num_variables,
@@ -104,7 +109,8 @@ where
     }
 }
 
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for CommitmentWriter<'_, F, EF, H, C, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref
+    for CommitmentWriter<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,

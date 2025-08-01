@@ -180,7 +180,7 @@ pub struct RoundConfig<F> {
 }
 
 #[derive(Debug, Clone)]
-pub struct WhirConfig<F, EF, Hash, C,  const DIGEST_ELEMS: usize>
+pub struct WhirConfig<F, EF, Hash, C, const DIGEST_ELEMS: usize>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -219,7 +219,10 @@ where
     EF: ExtensionField<F> + TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(whir_parameters: WhirConfigBuilder<F, EF, H, C, DIGEST_ELEMS>, num_variables: usize) -> Self {
+    pub fn new(
+        whir_parameters: WhirConfigBuilder<F, EF, H, C, DIGEST_ELEMS>,
+        num_variables: usize,
+    ) -> Self {
         whir_parameters
             .folding_factor
             .check_validity(num_variables)

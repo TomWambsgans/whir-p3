@@ -44,13 +44,13 @@ where
 
     /// Merkle commitment prover data for the **base field** polynomial from the first round.
     /// This is used to open values at queried locations.
-    pub(crate) commitment_merkle_prover_data_a: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
+    pub(crate) commitment_merkle_prover_data_a: RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>,
 
-    pub(crate) commitment_merkle_prover_data_b: Option<RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>>,
+    pub(crate) commitment_merkle_prover_data_b: Option<RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>>,
 
     /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
     /// Present only after the first round.
-    pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<F>, EF, DIGEST_ELEMS>>,
+    pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<EF>, EF, DIGEST_ELEMS>>,
 
     /// Flat vector of challenge values used across all rounds.
     /// Populated progressively as folding randomness is sampled.
@@ -67,13 +67,13 @@ impl<F, EF, const DIGEST_ELEMS: usize> RoundState<F, EF, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
-    F: ExtensionField<PF<F>>,
-    EF: ExtensionField<PF<F>>,
+    F: ExtensionField<PF<EF>>,
+    EF: ExtensionField<PF<EF>>,
 {
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
-        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
         mut statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &EvaluationsList<F>,
@@ -127,7 +127,7 @@ where
     #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
-        prover_state: &mut ProverState<PF<F>, EF, impl WhirFS<F>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl WhirFS<EF>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &EvaluationsList<F>,

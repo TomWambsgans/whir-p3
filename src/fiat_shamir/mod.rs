@@ -25,8 +25,8 @@ pub trait BitsSampler<F> {
     fn sample_bits(&mut self, bits: usize) -> usize;
 }
 
-pub trait WhirFS<F: Field>:
-    FieldChallenger<PF<F>> + GrindingChallenger<Witness = PF<F>> + ChallengerState
+pub trait WhirFS<EF: Field>:
+    FieldChallenger<PF<EF>> + GrindingChallenger<Witness = PF<EF>> + ChallengerState
 {
 }
 

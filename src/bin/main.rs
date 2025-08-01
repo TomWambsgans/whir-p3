@@ -25,14 +25,14 @@ use whir_p3::{
 type F = BinomialExtensionField<KoalaBear, 8>;
 type EF = BinomialExtensionField<KoalaBear, 8>;
 
-type FPrimeSubfield = <F as PrimeCharacteristicRing>::PrimeSubfield;
+type EFPrimeSubfield = <EF as PrimeCharacteristicRing>::PrimeSubfield;
 
 type Poseidon16 = Poseidon2KoalaBear<16>;
 type Poseidon24 = Poseidon2KoalaBear<24>;
 
 type MerkleHash = PaddingFreeSponge<Poseidon24, 24, 16, 8>; // leaf hashing
 type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 compression
-type MyChallenger = DuplexChallenger<FPrimeSubfield, Poseidon16, 16, 8>;
+type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
     let env_filter = EnvFilter::builder()
@@ -121,7 +121,7 @@ fn main() {
 
     // Commit to the polynomial and produce a witness
 
-    let dft = EvalsDft::<FPrimeSubfield>::new(1 << params_a.max_fft_size());
+    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
     let time = Instant::now();
     let witness_a = CommitmentWriter::new(&params_a)
@@ -181,7 +181,7 @@ fn main() {
         opening_time.as_millis()
     );
     let proof_size =
-        prover_state.proof_data().len() as f64 * (FPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
+        prover_state.proof_data().len() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
     println!("proof size: {:.2} KiB", proof_size / 1024.0);
     println!("Verification time: {} μs", verify_time.as_micros());
 }

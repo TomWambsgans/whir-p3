@@ -22,7 +22,7 @@ where
     EF: ExtensionField<F>,
 {
     /// Prover data of the Merkle tree.  
-    pub prover_data: RoundMerkleTree<PF<F>, F, DIGEST_ELEMS>,
+    pub prover_data: RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>,
     /// Out-of-domain challenge points used for polynomial verification.  
     pub ood_points: Vec<EF>,
     /// The corresponding polynomial evaluations at the OOD challenge points.  

@@ -13,14 +13,19 @@ use super::{
     utils::get_challenge_stir_queries,
 };
 use crate::{
+    PF,
     fiat_shamir::{
+        WhirFS,
         errors::{ProofError, ProofResult},
-        verifier::{ VerifierState}, WhirFS,
-    }, poly::{evals::EvaluationsList, multilinear::MultilinearPoint}, utils::pack_scalars_to_extension, whir::{
+        verifier::VerifierState,
+    },
+    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    utils::pack_scalars_to_extension,
+    whir::{
         config::{RoundConfig, WhirConfig},
         statement::Statement,
         verifier::sumcheck::verify_sumcheck_rounds,
-    }, PF
+    },
 };
 
 pub mod sumcheck;
@@ -42,8 +47,7 @@ impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> Verifier<'a, F, EF, H, C, DIGES
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<F>>,
-    F: ExtensionField<PF<F>>
-    
+    F: ExtensionField<PF<F>>,
 {
     pub const fn new(params: &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>) -> Self {
         Self(params)
@@ -66,7 +70,6 @@ where
         C: PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
             + PseudoCompressionFunction<[PF<F>; DIGEST_ELEMS], 2>
             + Sync,
-            
         [PF<F>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // During the rounds we collect constraints, combination randomness, folding randomness
