@@ -22,7 +22,10 @@ use whir_p3::{
     },
 };
 
-type F = BinomialExtensionField<KoalaBear, 8>;
+// Commit A in F, B in EF
+// TODO there is a big overhead embedding overhead in the sumcheck
+
+type F = KoalaBear;
 type EF = BinomialExtensionField<KoalaBear, 8>;
 
 type EFPrimeSubfield = <EF as PrimeCharacteristicRing>::PrimeSubfield;
@@ -51,66 +54,96 @@ fn main() {
     let merkle_hash = MerkleHash::new(poseidon24);
     let merkle_compress = MerkleCompress::new(poseidon16.clone());
 
-    // let vars_diff = 1;
+    type BaseFieldA = F;
+    type BaseFieldB = EF;
 
-    let num_variables_a = 22;
-    // let num_variables_b = num_variables_a - vars_diff;
+    let vars_diff = 3;
+
+    let num_variables_a = 25;
+    let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
-    // let num_coeffs_b = 1 << num_variables_b;
+    let num_coeffs_b = 1 << num_variables_b;
+
+    let folding_factor_first_round_a: usize = 7;
+    let folding_factor_first_round_b: usize = folding_factor_first_round_a - vars_diff;
+    let folding_factor_after = 4;
 
     // Construct WHIR protocol parameters
     let whir_params_a = WhirConfigBuilder {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::ConstantFromSecondRound(4, 4),
+        folding_factor: FoldingFactor::ConstantFromSecondRound(
+            folding_factor_first_round_a,
+            folding_factor_after,
+        ),
+        merkle_hash: merkle_hash.clone(),
+        merkle_compress: merkle_compress.clone(),
+        soundness_type: SecurityAssumption::CapacityBound,
+        starting_log_inv_rate: 1,
+        rs_domain_initial_reduction_factor: 3,
+        base_field: PhantomData::<BaseFieldA>,
+        extension_field: PhantomData::<EF>,
+    };
+
+    let whir_params_b = WhirConfigBuilder {
+        security_level: 128,
+        max_num_variables_to_send_coeffs: 6,
+        pow_bits: DEFAULT_MAX_POW,
+        folding_factor: FoldingFactor::ConstantFromSecondRound(
+            folding_factor_first_round_b,
+            folding_factor_after,
+        ),
         merkle_hash,
         merkle_compress,
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 3,
-        base_field: PhantomData::<F>,
+        base_field: PhantomData::<BaseFieldB>,
         extension_field: PhantomData::<EF>,
     };
 
-    // let mut whir_params_b = whir_params_a.clone();
-    // whir_params_b.folding_factor = FoldingFactor::Constant(4 - vars_diff);
-
-    let params_a =
-        WhirConfig::<F, EF, MerkleHash, MerkleCompress, 8>::new(whir_params_a, num_variables_a);
-    // let params_b = WhirConfig::<F, EF, MerkleHash, MerkleCompress, MyChallenger>::new(
-    //     mv_params_b,
-    //     whir_params_b,
-    // );
+    let params_a = WhirConfig::<BaseFieldA, EF, MerkleHash, MerkleCompress, 8>::new(
+        whir_params_a,
+        num_variables_a,
+    );
+    let params_b = WhirConfig::<BaseFieldB, EF, MerkleHash, MerkleCompress, 8>::new(
+        whir_params_b,
+        num_variables_b,
+    );
 
     // println!("Using parameters:\n{}", params.to_string());
 
     let mut rng = StdRng::seed_from_u64(0);
-    let polynomial_a = (0..num_coeffs_a).map(|_| rng.random()).collect::<Vec<_>>();
-    // let polynomial_b = EvaluationsList::<F>::new((0..num_coeffs_b).map(|_| rng.random()).collect());
+    let polynomial_a = (0..num_coeffs_a)
+        .map(|_| rng.random())
+        .collect::<Vec<BaseFieldA>>();
+    let polynomial_b = (0..num_coeffs_b)
+        .map(|_| rng.random())
+        .collect::<Vec<BaseFieldB>>();
 
     // Sample `num_points` random multilinear points in the Boolean hypercube
     let points_a = (0..3)
         .map(|_| MultilinearPoint::rand(&mut rng, num_variables_a))
         .collect::<Vec<_>>();
-    // let points_b = (0..2)
-    //     .map(|_| MultilinearPoint::rand(&mut rng, num_variables_b))
-    //     .collect::<Vec<_>>();
+    let points_b = (0..2)
+        .map(|_| MultilinearPoint::rand(&mut rng, num_variables_b))
+        .collect::<Vec<_>>();
 
     // Construct a new statement with the correct number of variables
     let mut statement_a = Statement::<EF>::new(num_variables_a);
-    // let mut statement_b = Statement::<EF>::new(num_variables_b);
+    let mut statement_b = Statement::<EF>::new(num_variables_b);
 
     // Add constraints for each sampled point (equality constraints)
     for point_a in &points_a {
         let eval = polynomial_a.evaluate(point_a);
         statement_a.add_constraint(point_a.clone(), eval);
     }
-    // for point_b in &points_b {
-    //     let eval = polynomial_b.evaluate(point_b);
-    //     statement_b.add_constraint(point_b.clone(), eval);
-    // }
+    for point_b in &points_b {
+        let eval = polynomial_b.evaluate(point_b);
+        statement_b.add_constraint(point_b.clone(), eval);
+    }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
 
@@ -129,23 +162,24 @@ fn main() {
         .unwrap();
     let commit_time_a = time.elapsed();
 
-    // let time = Instant::now();
-    // let witness_b = CommitmentWriter::new(&params_b)
-    //     .commit(&dft, &mut prover_state, polynomial_b)
-    //     .unwrap();
-    // let commit_time_b = time.elapsed();
+    let time = Instant::now();
+    let witness_b = Commiter(&params_b)
+        .commit(&dft, &mut prover_state, &polynomial_b)
+        .unwrap();
+    let commit_time_b = time.elapsed();
 
     // Generate a proof for the given statement and witness
     let time = Instant::now();
     Prover(&params_a)
-        .prove(
+        .batch_prove(
             &dft,
             &mut prover_state,
             statement_a.clone(),
             witness_a,
             &polynomial_a,
-            // statement_b.clone(),
-            // witness_b,
+            statement_b.clone(),
+            witness_b,
+            &polynomial_b,
         )
         .unwrap();
     let opening_time = time.elapsed();
@@ -157,27 +191,27 @@ fn main() {
     let parsed_commitment_a = CommitmentReader(&params_a)
         .parse_commitment(&mut verifier_state)
         .unwrap();
-    // let parsed_commitment_b = CommitmentReader::new(&params_b)
-    //     .parse_commitment(&mut verifier_state)
-    //     .unwrap();
+    let parsed_commitment_b = CommitmentReader(&params_b)
+        .parse_commitment(&mut verifier_state)
+        .unwrap();
 
     let verif_time = Instant::now();
     Verifier(&params_a)
-        .verify(
+        .batch_verify(
             &mut verifier_state,
             &parsed_commitment_a,
             &statement_a,
-            // &parsed_commitment_b,
-            // &statement_b,
+            &parsed_commitment_b,
+            &statement_b,
         )
         .unwrap();
     let verify_time = verif_time.elapsed();
 
     println!(
-        "\nProving time: {} ms (commit: {} ms, opening: {} ms)",
-        commit_time_a.as_millis() + opening_time.as_millis(),
+        "\nProving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",
+        commit_time_a.as_millis() + commit_time_b.as_millis() + opening_time.as_millis(),
         commit_time_a.as_millis(),
-        // commit_time_b.as_millis(),
+        commit_time_b.as_millis(),
         opening_time.as_millis()
     );
     let proof_size =

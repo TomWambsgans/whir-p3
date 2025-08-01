@@ -36,7 +36,7 @@ where
 
     /// The sumcheck prover responsible for managing constraint accumulation and sumcheck rounds.
     /// Initialized in the first round (if applicable), and reused/updated in each subsequent round.
-    pub(crate) sumcheck_prover: SumcheckSingle<F, EF>,
+    pub(crate) sumcheck_prover: SumcheckSingle<EF>,
 
     /// The sampled folding randomness for this round, used to collapse a subset of variables.
     /// Length equals the folding factor at this round.
@@ -46,7 +46,7 @@ where
     /// This is used to open values at queried locations.
     pub(crate) commitment_merkle_prover_data_a: RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>,
 
-    pub(crate) commitment_merkle_prover_data_b: Option<RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>>,
+    pub(crate) commitment_merkle_prover_data_b: Option<RoundMerkleTree<PF<EF>, EF, DIGEST_ELEMS>>,
 
     /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
     /// Present only after the first round.
@@ -132,8 +132,8 @@ where
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &[F],
         statement_b: Statement<EF>,
-        witness_b: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial_b: &[F],
+        witness_b: Witness<EF, EF, DIGEST_ELEMS>,
+        polynomial_b: &[EF],
     ) -> ProofResult<Self> {
         let n_vars_a = statement_a.num_variables();
         let n_vars_b = statement_b.num_variables();
@@ -164,7 +164,7 @@ where
         let combination_randomness_gen: EF = prover_state.sample();
 
         let _span = info_span!("merging 2 batched polynomials", n_vars_a, n_vars_b,).entered();
-        let mut polynomial = F::zero_vec(polynomial_a.num_evals() * 2);
+        let mut polynomial = EF::zero_vec(polynomial_a.num_evals() * 2);
         polynomial
             .par_iter_mut()
             .step_by(1 << (1 + n_vars_a - n_vars_b))
@@ -177,7 +177,7 @@ where
             .step_by(2)
             .enumerate()
             .for_each(|(i, eval)| {
-                *eval = polynomial_a[i];
+                *eval = EF::from(polynomial_a[i]); // TODO embedding overhead
             });
         std::mem::drop(_span);
 
