@@ -270,6 +270,35 @@ where
             .sum::<EF>();
     }
 
+    pub fn add_new_base_equality(
+        &mut self,
+        points: &[MultilinearPoint<F>],
+        evaluations: &[EF],
+        combination_randomness: &[EF],
+    ) {
+        assert_eq!(combination_randomness.len(), points.len());
+        assert_eq!(evaluations.len(), points.len());
+
+        use tracing::info_span;
+
+        // Parallel update of weight buffer
+        info_span!("accumulate_weight_buffer_base").in_scope(|| {
+            points
+                .iter()
+                .zip(combination_randomness.iter())
+                .for_each(|(point, &rand)| {
+                    crate::utils::eval_eq_base::<_, _, true>(point, self.weights.evals_mut(), rand);
+                });
+        });
+
+        // Accumulate the weighted sum (cheap, done sequentially)
+        self.sum += combination_randomness
+            .iter()
+            .zip(evaluations.iter())
+            .map(|(&rand, &eval)| rand * eval)
+            .sum::<EF>();
+    }
+
     #[instrument(skip_all)]
     pub fn compute_sumcheck_polynomials(
         &mut self,
