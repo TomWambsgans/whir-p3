@@ -54,7 +54,7 @@ where
         &self,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        polynomial: &EvaluationsList<F>,
+        polynomial: &[F],
     ) -> ProofResult<Witness<F, EF, DIGEST_ELEMS>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -66,7 +66,7 @@ where
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let evals_repeated = info_span!("repeating evals")
-            .in_scope(|| parallel_repeat(polynomial.evals(), 1 << self.starting_log_inv_rate));
+            .in_scope(|| parallel_repeat(polynomial, 1 << self.starting_log_inv_rate));
 
         // Perform DFT on the padded evaluations matrix
         let width = 1 << self.folding_factor.at_round(0);

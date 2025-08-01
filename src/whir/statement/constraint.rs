@@ -20,7 +20,7 @@ pub struct Constraint<F> {
 impl<F: Field> Constraint<F> {
     /// Verify if a polynomial (in coefficient form) satisfies the constraint.
     #[must_use]
-    pub fn verify(&self, poly: &EvaluationsList<F>) -> bool {
+    pub fn verify(&self, poly: &[F]) -> bool {
         poly.evaluate(&self.weights) == self.sum
     }
 }

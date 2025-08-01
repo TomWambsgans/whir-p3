@@ -2,8 +2,8 @@ use p3_field::{ExtensionField, Field};
 use tracing::instrument;
 
 use crate::{
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    utils::{eval_eq, uninitialized_vec},
+    poly::multilinear::MultilinearPoint,
+    utils::{compute_eval_eq, uninitialized_vec},
     whir::statement::constraint::Constraint,
 };
 
@@ -119,36 +119,32 @@ impl<F: Field> Statement<F> {
     /// - `EvaluationsList<F>`: The combined polynomial `W(X)`.
     /// - `F`: The combined sum `S`.
     #[instrument(skip_all)]
-    pub fn combine<Base>(&self, challenge: F) -> (EvaluationsList<F>, F)
+    pub fn combine<Base>(&self, challenge: F) -> (Vec<F>, F)
     where
         Base: Field,
         F: ExtensionField<Base>,
     {
         if self.constraints.is_empty() {
-            return (
-                EvaluationsList::new(F::zero_vec(1 << self.num_variables)),
-                F::ZERO,
-            );
+            return (F::zero_vec(1 << self.num_variables), F::ZERO);
         }
         // Alloc memory without initializing it to zero.
         // This is safe because there is at least one constraint (otherwise it would return early),
         // and the first iteration of the loop will overwrite the entire vector.
-        let evaluations_vec = unsafe { uninitialized_vec::<F>(1 << self.num_variables) };
-        let mut combined_evals = EvaluationsList::new(evaluations_vec);
+        let mut combined_evals = unsafe { uninitialized_vec::<F>(1 << self.num_variables) };
         let (combined_sum, _) = self.constraints.iter().enumerate().fold(
             (F::ZERO, F::ONE),
             |(mut acc_sum, gamma_pow), (i, constraint)| {
                 if i == 0 {
                     // first iteration: combined_evals must be overwritten
-                    eval_eq::<Base, F, false>(
+                    compute_eval_eq::<Base, F, false>(
                         &constraint.weights,
-                        combined_evals.evals_mut(),
+                        &mut combined_evals,
                         gamma_pow,
                     );
                 } else {
-                    eval_eq::<Base, F, true>(
+                    compute_eval_eq::<Base, F, true>(
                         &constraint.weights,
-                        combined_evals.evals_mut(),
+                        &mut combined_evals,
                         gamma_pow,
                     );
                 }

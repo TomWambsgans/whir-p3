@@ -87,7 +87,7 @@ fn main() {
     // println!("Using parameters:\n{}", params.to_string());
 
     let mut rng = StdRng::seed_from_u64(0);
-    let polynomial_a = EvaluationsList::<F>::new((0..num_coeffs_a).map(|_| rng.random()).collect());
+    let polynomial_a = (0..num_coeffs_a).map(|_| rng.random()).collect::<Vec<_>>();
     // let polynomial_b = EvaluationsList::<F>::new((0..num_coeffs_b).map(|_| rng.random()).collect());
 
     // Sample `num_points` random multilinear points in the Boolean hypercube

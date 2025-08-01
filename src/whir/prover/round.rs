@@ -76,7 +76,7 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         mut statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial: &EvaluationsList<F>,
+        polynomial: &[F],
     ) -> ProofResult<Self> {
         // Convert witness ood_points into constraints
         let new_constraints = witness
@@ -130,10 +130,10 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial_a: &EvaluationsList<F>,
+        polynomial_a: &[F],
         statement_b: Statement<EF>,
         witness_b: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial_b: &EvaluationsList<F>,
+        polynomial_b: &[F],
     ) -> ProofResult<Self> {
         let n_vars_a = statement_a.num_variables();
         let n_vars_b = statement_b.num_variables();
@@ -170,18 +170,16 @@ where
             .step_by(1 << (1 + n_vars_a - n_vars_b))
             .enumerate()
             .for_each(|(i, eval)| {
-                *eval = polynomial_b.evals()[i];
+                *eval = polynomial_b[i];
             });
         polynomial[1..]
             .par_iter_mut()
             .step_by(2)
             .enumerate()
             .for_each(|(i, eval)| {
-                *eval = polynomial_a.evals()[i];
+                *eval = polynomial_a[i];
             });
         std::mem::drop(_span);
-
-        let polynomial = EvaluationsList::new(polynomial);
 
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
             &polynomial,

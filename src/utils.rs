@@ -28,7 +28,7 @@ const NUM_THREADS: usize = 1 << LOG_NUM_THREADS;
 /// - false: the result is directly set to the `out` buffer
 /// - true: the result is added to the `out` buffer
 #[inline]
-pub(crate) fn eval_eq<F, EF, const INITIALIZED: bool>(eval: &[EF], out: &mut [EF], scalar: EF)
+pub(crate) fn compute_eval_eq<F, EF, const INITIALIZED: bool>(eval: &[EF], out: &mut [EF], scalar: EF)
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -736,6 +736,13 @@ pub fn parallel_clone<A: Clone + Send + Sync>(src: &[A], dst: &mut [A]) {
                 d.clone_from_slice(s);
             });
     }
+}
+
+#[must_use]
+pub fn parallel_clone_vec<A: Clone + Send + Sync>(vec: &[A]) -> Vec<A> {
+    let mut res = unsafe { uninitialized_vec(vec.len()) };
+    parallel_clone(vec, &mut res);
+    res
 }
 
 pub fn parallel_repeat<A: Copy + Send + Sync>(src: &[A], n: usize) -> Vec<A> {

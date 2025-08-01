@@ -169,8 +169,7 @@ where
 
         // In the final round we receive the full polynomial instead of a commitment.
         let n_final_coeffs = 1 << self.n_vars_of_final_polynomial();
-        let final_coefficients = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
-        let final_evaluations = EvaluationsList::new(final_coefficients);
+        let final_evaluations = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
 
         // Verify in-domain challenges on the previous commitment.
         let stir_constraints = self.verify_stir_challenges(
@@ -306,8 +305,7 @@ where
 
         // In the final round we receive the full polynomial instead of a commitment.
         let n_final_coeffs = 1 << self.n_vars_of_final_polynomial();
-        let final_coefficients = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
-        let final_evaluations = EvaluationsList::new(final_coefficients);
+        let final_evaluations = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
 
         // Verify in-domain challenges on the previous commitment.
         let stir_constraints = self.verify_stir_challenges(
@@ -475,7 +473,7 @@ where
         // Compute STIR Constraints
         let folds: Vec<_> = answers
             .into_iter()
-            .map(|answers| EvaluationsList::new(answers).evaluate(folding_randomness))
+            .map(|answers| answers.evaluate(folding_randomness))
             .collect();
 
         let stir_constraints = stir_challenges_indexes
@@ -561,12 +559,12 @@ where
             .into_iter()
             .zip(answers_b)
             .map(|(answer_a, answer_b)| {
-                let eval_a = EvaluationsList::new(answer_a).evaluate(&MultilinearPoint(
+                let eval_a = answer_a.evaluate(&MultilinearPoint(
                     folding_randomness[..folding_randomness.len() - 1].to_vec(),
                 ));
                 let vars_b = answer_b.len().ilog2() as usize;
-                let eval_b = EvaluationsList::new(answer_b)
-                    .evaluate(&MultilinearPoint(folding_randomness[..vars_b].to_vec()));
+                let eval_b =
+                    answer_b.evaluate(&MultilinearPoint(folding_randomness[..vars_b].to_vec()));
                 eval_a * folding_randomness[folding_randomness.len() - 1]
                     + eval_b
                         * folding_randomness[vars_b..]

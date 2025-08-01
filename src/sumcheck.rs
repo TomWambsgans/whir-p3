@@ -12,42 +12,35 @@ use crate::{
 const PARALLEL_THRESHOLD: usize = 4096;
 
 #[instrument(skip_all)]
-pub fn compress_ext<F: Field, EF: ExtensionField<F>>(
-    evals: &EvaluationsList<F>,
-    r: EF,
-) -> EvaluationsList<EF> {
+pub fn compress_ext<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
     assert_ne!(evals.num_variables(), 0);
 
     // Fold between base and extension field elements
     let fold = |slice: &[F]| -> EF { r * (slice[1] - slice[0]) + slice[0] };
-
-    let folded = if evals.evals().len() >= PARALLEL_THRESHOLD {
-        evals.evals().par_chunks_exact(2).map(fold).collect()
+    if evals.len() >= PARALLEL_THRESHOLD {
+        evals.par_chunks_exact(2).map(fold).collect()
     } else {
-        evals.evals().chunks_exact(2).map(fold).collect()
-    };
-
-    EvaluationsList::new(folded)
+        evals.chunks_exact(2).map(fold).collect()
+    }
 }
 
-pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
+pub fn compress<F: Field>(evals: &mut Vec<F>, r: F) {
     assert_ne!(evals.num_variables(), 0);
 
-    if evals.evals().len() >= PARALLEL_THRESHOLD {
+    if evals.len() >= PARALLEL_THRESHOLD {
         // Define the folding operation for a pair of elements.
         let fold = |slice: &[F]| -> F { r * (slice[1] - slice[0]) + slice[0] };
         // Execute the fold in parallel and collect into a new vector.
-        let folded = evals.evals().par_chunks_exact(2).map(fold).collect();
+        let folded = evals.par_chunks_exact(2).map(fold).collect();
         // Replace the old evaluations with the new, folded evaluations.
-        *evals = EvaluationsList::new(folded);
+        *evals = folded;
     } else {
         // For smaller inputs, we use the sequential, in-place strategy to save memory.
         let mid = evals.len() / 2;
-        let evals_slice = evals.evals_mut();
         for i in 0..mid {
-            let p0 = evals_slice[2 * i];
-            let p1 = evals_slice[2 * i + 1];
-            evals_slice[i] = r * (p1 - p0) + p0;
+            let p0 = evals[2 * i];
+            let p1 = evals[2 * i + 1];
+            evals[i] = r * (p1 - p0) + p0;
         }
         evals.truncate(mid);
     }
@@ -55,11 +48,11 @@ pub fn compress<F: Field>(evals: &mut EvaluationsList<F>, r: F) {
 
 fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-    evals: &EvaluationsList<F>,
-    weights: &mut EvaluationsList<EF>,
+    evals: &[F],
+    weights: &mut Vec<EF>,
     sum: &mut EF,
     pow_bits: usize,
-) -> (EF, EvaluationsList<EF>) {
+) -> (EF, Vec<EF>) {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
@@ -95,8 +88,8 @@ fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
 /// The verifier's challenge `r` as an `EF` element.
 fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-    evals: &mut EvaluationsList<EF>,
-    weights: &mut EvaluationsList<EF>,
+    evals: &mut Vec<EF>,
+    weights: &mut Vec<EF>,
     sum: &mut EF,
     pow_bits: usize,
 ) -> EF {
@@ -131,16 +124,15 @@ pub fn univariate_selectors<F: Field>(n: usize) -> Vec<WhirDensePolynomial<F>> {
 
 #[instrument(skip_all, level = "debug")]
 pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
-    evals: &EvaluationsList<F>,
-    weights: &EvaluationsList<EF>,
+    evals: &[F],
+    weights: &Vec<EF>,
     sum: EF,
 ) -> WhirDensePolynomial<EF> {
     assert!(evals.num_variables() >= 1);
 
     let (c0, c2) = evals
-        .evals()
         .par_chunks_exact(2)
-        .zip(weights.evals().par_chunks_exact(2))
+        .zip(weights.par_chunks_exact(2))
         .map(sumcheck_quadratic::<F, EF>)
         .reduce(
             || (EF::ZERO, EF::ZERO),
@@ -181,9 +173,9 @@ where
 #[derive(Debug, Clone)]
 pub struct SumcheckSingle<F, EF> {
     /// Evaluations of the polynomial `p(X)`.
-    pub(crate) evals: EvaluationsList<EF>,
+    pub(crate) evals: Vec<EF>,
     /// Evaluations of the equality polynomial used for enforcing constraints.
-    pub(crate) weights: EvaluationsList<EF>,
+    pub(crate) weights: Vec<EF>,
     /// Accumulated sum incorporating equality constraints.
     pub(crate) sum: EF,
     /// Marker for phantom type parameter `F`.
@@ -197,7 +189,7 @@ where
 {
     #[instrument(skip_all)]
     pub fn from_base_evals(
-        evals: &EvaluationsList<F>,
+        evals: &[F],
         statement: &Statement<EF>,
         combination_randomness: EF,
 
@@ -236,7 +228,7 @@ where
         (sumcheck, MultilinearPoint(res))
     }
 
-    pub const fn num_variables(&self) -> usize {
+    pub fn num_variables(&self) -> usize {
         self.evals.num_variables()
     }
 
@@ -259,7 +251,11 @@ where
                 .iter()
                 .zip(combination_randomness.iter())
                 .for_each(|(point, &rand)| {
-                    crate::utils::eval_eq::<_, _, true>(point, self.weights.evals_mut(), rand);
+                    crate::utils::compute_eval_eq::<_, _, true>(
+                        point,
+                        &mut self.weights,
+                        rand,
+                    );
                 });
         });
 
@@ -287,7 +283,7 @@ where
                 .iter()
                 .zip(combination_randomness.iter())
                 .for_each(|(point, &rand)| {
-                    crate::utils::eval_eq_base::<_, _, true>(point, self.weights.evals_mut(), rand);
+                    crate::utils::eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
                 });
         });
 

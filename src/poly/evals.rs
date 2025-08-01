@@ -1,202 +1,70 @@
-use std::ops::Deref;
+use std::borrow::Borrow;
 
 use p3_field::{ExtensionField, Field};
 use rayon::prelude::*;
 use tracing::instrument;
 
 use super::multilinear::MultilinearPoint;
-use crate::utils::{eval_eq, parallel_clone, uninitialized_vec};
+use crate::utils::compute_eval_eq;
 
-/// Represents a multilinear polynomial `f` in `num_variables` unknowns, stored via its evaluations
-/// over the hypercube `{0,1}^{num_variables}`.
-///
-/// The vector `evals` contains function evaluations at **lexicographically ordered** points.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct EvaluationsList<F>(Vec<F>);
+/// Given `evals` = (α_1, ..., α_n), returns a multilinear polynomial P in n variables,
+/// defined on the boolean hypercube by: ∀ (x_1, ..., x_n) ∈ {0, 1}^n,
+/// P(x_1, ..., x_n) = Π_{i=1}^{n} (x_i.α_i + (1 - x_i).(1 - α_i))
+/// (often denoted as P(x) = eq(x, evals))
+pub fn eval_eq<F: Field>(eval: &[F]) -> Vec<F> {
+    // Alloc memory without initializing it to zero.
+    // This is safe because we overwrite it inside `eval_eq`.
+    let mut out: Vec<F> = Vec::with_capacity(1 << eval.len());
+    #[allow(clippy::uninit_vec)]
+    unsafe {
+        out.set_len(1 << eval.len());
+    }
+    compute_eval_eq::<_, _, false>(eval, &mut out, F::ONE);
+    out
+}
 
-impl<F> EvaluationsList<F>
-where
-    F: Field,
-{
-    /// Constructs an `EvaluationsList` from a given vector of evaluations.
-    ///
-    /// - The `evals` vector must have a **length that is a power of two** since it represents
-    ///   evaluations over an `n`-dimensional binary hypercube.
-    /// - The ordering of evaluation points follows **lexicographic order**.
-    ///
-    /// **Mathematical Constraint:**
-    /// If `evals.len() = 2^n`, then `num_variables = n`, ensuring correct indexing.
-    ///
-    /// **Panics:**
-    /// - If `evals.len()` is **not** a power of two.
-    #[must_use]
-    pub fn new(evals: Vec<F>) -> Self {
-        let len = evals.len();
-        assert!(
-            len.is_power_of_two(),
-            "Evaluation list length must be a power of two."
-        );
+pub trait EvaluationsList<F: Field> {
+    fn num_variables(&self) -> usize;
+    fn num_evals(&self) -> usize;
+    fn evaluate<EF: ExtensionField<F>>(&self, point: &MultilinearPoint<EF>) -> EF;
+    fn as_constant(&self) -> F;
+}
 
-        Self(evals)
+impl<F: Field, EL: Borrow<[F]>> EvaluationsList<F> for EL {
+    fn num_variables(&self) -> usize {
+        self.borrow().len().ilog2() as usize
     }
 
-    /// Given `evals` = (α_1, ..., α_n), returns a multilinear polynomial P in n variables,
-    /// defined on the boolean hypercube by: ∀ (x_1, ..., x_n) ∈ {0, 1}^n,
-    /// P(x_1, ..., x_n) = Π_{i=1}^{n} (x_i.α_i + (1 - x_i).(1 - α_i))
-    /// (often denoted as P(x) = eq(x, evals))
-    pub fn eval_eq(eval: &[F]) -> Self {
-        // Alloc memory without initializing it to zero.
-        // This is safe because we overwrite it inside `eval_eq`.
-        let mut out: Vec<F> = Vec::with_capacity(1 << eval.len());
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            out.set_len(1 << eval.len());
-        }
-        eval_eq::<_, _, false>(eval, &mut out, F::ONE);
-        Self(out)
+    fn num_evals(&self) -> usize {
+        self.borrow().len()
     }
 
-    /// Returns an immutable reference to the evaluations vector.
-    #[must_use]
-    pub fn evals(&self) -> &[F] {
-        &self.0
+    fn evaluate<EF: ExtensionField<F>>(&self, point: &MultilinearPoint<EF>) -> EF {
+        eval_multilinear(self.borrow(), point)
     }
 
-    #[must_use]
-    pub fn into_evals(self) -> Vec<F> {
-        self.0
-    }
-
-    /// Returns a mutable reference to the evaluations vector.
-    pub fn evals_mut(&mut self) -> &mut [F] {
-        &mut self.0
-    }
-
-    /// Returns the total number of stored evaluations.
-    ///
-    /// Mathematical Invariant:
-    /// ```ignore
-    /// num_evals = 2^{num_variables}
-    /// ```
-    #[must_use]
-    pub fn num_evals(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Returns the number of variables in the multilinear polynomial.
-    #[must_use]
-    pub const fn num_variables(&self) -> usize {
-        self.0.len().ilog2() as usize
-    }
-
-    /// Truncates the list of evaluations to a new length.
-    ///
-    /// This is used in protocols like sumcheck where the number of evaluations is
-    /// halved in each round. The new length must be a power of two.
-    ///
-    /// # Panics
-    /// Panics if `new_len` is not a power of two.
-    pub fn truncate(&mut self, new_len: usize) {
-        assert!(
-            new_len.is_power_of_two(),
-            "New evaluation list length must be a power of two."
-        );
-        self.0.truncate(new_len);
-    }
-
-    /// Evaluates the multilinear polynomial at `point ∈ [0,1]^n`.
-    ///
-    /// - If `point ∈ {0,1}^n`, returns the precomputed evaluation `f(point)`.
-    /// - Otherwise, computes `f(point) = ∑_{x ∈ {0,1}^n} eq(x, point) * f(x)`, where `eq(x, point)
-    ///   = ∏_{i=1}^{n} (1 - p_i + 2 p_i x_i)`.
-    /// - Uses fast multilinear interpolation for efficiency.
-    #[must_use]
-    pub fn evaluate<EF>(&self, point: &MultilinearPoint<EF>) -> EF
-    where
-        EF: ExtensionField<F>,
-    {
-        if let Some(point) = point.to_hypercube() {
-            return self.0[point.0].into();
-        }
-        eval_multilinear(&self.0, point)
-    }
-
-    /// Evaluates the polynomial as a constant.
-    /// This is only valid for constant polynomials (i.e., when `num_variables` is 0).
-    ///
-    /// # Panics
-    /// Panics if `num_variables` is not 0.
-    #[must_use]
-    pub fn as_constant(&self) -> F {
-        assert_eq!(
-            self.len(),
-            1,
-            "`as_constant` is only valid for constant polynomials."
-        );
-        self.0[0]
-    }
-
-    /// Folds a multilinear polynomial stored in evaluation form along the last `k` variables.
-    ///
-    /// Given evaluations `f: {0,1}^n → F`, this method returns a new evaluation list `g` such that:
-    ///
-    /// \[
-    /// g(x_0, ..., x_{n-k-1}) = f(x_0, ..., x_{n-k-1}, r_0, ..., r_{k-1})
-    /// \]
-    ///
-    /// where `folding_randomness = (r_0, ..., r_{k-1})` is a fixed assignment to the last `k` variables.
-    ///
-    /// This operation reduces the dimensionality of the polynomial:
-    ///
-    /// - Input: `f ∈ F^{2^n}`
-    /// - Output: `g ∈ EF^{2^{n-k}}`, where `EF` is an extension field of `F`
-    ///
-    /// # Arguments
-    /// - `folding_randomness`: The extension-field values to substitute for the last `k` variables.
-    ///
-    /// # Returns
-    /// - A new `EvaluationsList<EF>` representing the folded function over the remaining `n - k` variables.
-    ///
-    /// # Panics
-    /// - If the evaluation list is not sized `2^n` for some `n`.
-    #[instrument(skip_all)]
-    #[must_use]
-    pub fn fold<EF>(&self, folding_randomness: &MultilinearPoint<EF>) -> EvaluationsList<EF>
-    where
-        EF: ExtensionField<F>,
-    {
-        let folding_factor = folding_randomness.num_variables();
-        let evals = self
-            .0
-            .par_chunks_exact(1 << folding_factor)
-            .map(|ev| eval_multilinear(ev, folding_randomness))
-            .collect();
-
-        EvaluationsList::new(evals)
-    }
-
-    #[must_use]
-    #[instrument(skip_all)]
-    pub fn parallel_clone(&self) -> Self {
-        let mut evals = unsafe { uninitialized_vec(self.0.len()) };
-        parallel_clone(&self.0, &mut evals);
-        Self(evals)
-    }
-
-    /// Multiply the polynomial by a scalar factor.
-    #[must_use]
-    pub fn scale<EF: ExtensionField<F>>(&self, factor: EF) -> EvaluationsList<EF> {
-        let evals = self.0.par_iter().map(|&e| factor * e).collect();
-        EvaluationsList(evals)
+    fn as_constant(&self) -> F {
+        assert_eq!(self.borrow().len(), 1);
+        self.borrow()[0]
     }
 }
 
-impl<F> Deref for EvaluationsList<F> {
-    type Target = [F];
+#[instrument(skip_all)]
+#[must_use]
+pub fn fold_multilinear<F: Field, EF: ExtensionField<F>>(
+    poly: &[F],
+    folding_randomness: &MultilinearPoint<EF>,
+) -> Vec<EF> {
+    let folding_factor = folding_randomness.num_variables();
+    poly.par_chunks_exact(1 << folding_factor)
+        .map(|ev| eval_multilinear(ev, folding_randomness))
+        .collect()
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+/// Multiply the polynomial by a scalar factor.
+#[must_use]
+pub fn scale_poly<F: Field, EF: ExtensionField<F>>(poly: &[F], factor: EF) -> Vec<EF> {
+    poly.par_iter().map(|&e| factor * e).collect()
 }
 
 /// Evaluates a multilinear polynomial at `point ∈ [0,1]^n` using fast interpolation.

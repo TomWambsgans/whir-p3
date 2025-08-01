@@ -103,7 +103,7 @@ where
     fn validate_witness(
         &self,
         witness: &Witness<F, EF, DIGEST_ELEMS>,
-        polynomial: &EvaluationsList<F>,
+        polynomial: &[F],
     ) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         polynomial.num_variables() == self.num_variables
@@ -116,7 +116,7 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement: Statement<EF>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial: &EvaluationsList<F>,
+        polynomial: &[F],
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -167,10 +167,10 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Statement<EF>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial_a: &EvaluationsList<F>,
+        polynomial_a: &[F],
         statement_b: Statement<EF>,
         witness_b: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial_b: &EvaluationsList<F>,
+        polynomial_b: &[F],
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -253,7 +253,7 @@ where
         let inv_rate = new_domain_size / folded_evaluations.num_evals();
         let folded_matrix = info_span!("fold matrix").in_scope(|| {
             let evals_repeated = info_span!("repeating evals")
-                .in_scope(|| parallel_repeat(folded_evaluations.evals(), inv_rate));
+                .in_scope(|| parallel_repeat(folded_evaluations, inv_rate));
             // Do DFT on only interleaved polys to be folded.
             info_span!(
                 "dft",
@@ -358,10 +358,10 @@ where
                             [..round_state.folding_randomness.len() - 1]
                             .to_vec();
                         let vars_b = answer_b.len().ilog2() as usize;
-                        let eval_a = EvaluationsList::new(answer_a.clone())
+                        let eval_a = answer_a
                             .evaluate(&MultilinearPoint(a_trunc));
                         let b_trunc = round_state.folding_randomness[..vars_b].to_vec();
-                        let eval_b = EvaluationsList::new(answer_b.clone())
+                        let eval_b = answer_b
                             .evaluate(&MultilinearPoint(b_trunc));
                         let last_fold_rand_a = round_state.folding_randomness
                             [round_state.folding_randomness.len() - 1];
@@ -400,7 +400,7 @@ where
                     let mut stir_evaluations = Vec::with_capacity(answers.len());
                     for answer in &answers {
                         stir_evaluations.push(
-                            EvaluationsList::new(answer.clone())
+                            answer
                                 .evaluate(&round_state.folding_randomness),
                         );
                     }
@@ -434,7 +434,7 @@ where
                 let mut stir_evaluations = Vec::with_capacity(answers.len());
                 for answer in &answers {
                     stir_evaluations.push(
-                        EvaluationsList::new(answer.clone())
+                        answer
                             .evaluate(&round_state.folding_randomness),
                     );
                 }
