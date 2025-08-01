@@ -12,13 +12,7 @@ use crate::utils::{eval_eq, parallel_clone, uninitialized_vec};
 ///
 /// The vector `evals` contains function evaluations at **lexicographically ordered** points.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct EvaluationsList<F> {
-    /// Stores evaluations in **lexicographic order**.
-    evals: Vec<F>,
-    /// Number of variables in the multilinear polynomial.
-    /// Ensures `evals.len() = 2^{num_variables}`.
-    num_variables: usize,
-}
+pub struct EvaluationsList<F>(Vec<F>);
 
 impl<F> EvaluationsList<F>
 where
@@ -43,10 +37,7 @@ where
             "Evaluation list length must be a power of two."
         );
 
-        Self {
-            evals,
-            num_variables: len.ilog2() as usize,
-        }
+        Self(evals)
     }
 
     /// Given `evals` = (α_1, ..., α_n), returns a multilinear polynomial P in n variables,
@@ -62,26 +53,23 @@ where
             out.set_len(1 << eval.len());
         }
         eval_eq::<_, _, false>(eval, &mut out, F::ONE);
-        Self {
-            evals: out,
-            num_variables: eval.len(),
-        }
+        Self(out)
     }
 
     /// Returns an immutable reference to the evaluations vector.
     #[must_use]
     pub fn evals(&self) -> &[F] {
-        &self.evals
+        &self.0
     }
 
     #[must_use]
     pub fn into_evals(self) -> Vec<F> {
-        self.evals
+        self.0
     }
 
     /// Returns a mutable reference to the evaluations vector.
     pub fn evals_mut(&mut self) -> &mut [F] {
-        &mut self.evals
+        &mut self.0
     }
 
     /// Returns the total number of stored evaluations.
@@ -92,13 +80,13 @@ where
     /// ```
     #[must_use]
     pub fn num_evals(&self) -> usize {
-        self.evals.len()
+        self.0.len()
     }
 
     /// Returns the number of variables in the multilinear polynomial.
     #[must_use]
     pub const fn num_variables(&self) -> usize {
-        self.num_variables
+        self.0.len().ilog2() as usize
     }
 
     /// Truncates the list of evaluations to a new length.
@@ -113,12 +101,7 @@ where
             new_len.is_power_of_two(),
             "New evaluation list length must be a power of two."
         );
-        self.evals.truncate(new_len);
-        self.num_variables = if new_len == 0 {
-            0
-        } else {
-            new_len.ilog2() as usize
-        };
+        self.0.truncate(new_len);
     }
 
     /// Evaluates the multilinear polynomial at `point ∈ [0,1]^n`.
@@ -133,9 +116,9 @@ where
         EF: ExtensionField<F>,
     {
         if let Some(point) = point.to_hypercube() {
-            return self.evals[point.0].into();
+            return self.0[point.0].into();
         }
-        eval_multilinear(&self.evals, point)
+        eval_multilinear(&self.0, point)
     }
 
     /// Evaluates the polynomial as a constant.
@@ -146,10 +129,11 @@ where
     #[must_use]
     pub fn as_constant(&self) -> F {
         assert_eq!(
-            self.num_variables, 0,
+            self.len(),
+            1,
             "`as_constant` is only valid for constant polynomials."
         );
-        self.evals[0]
+        self.0[0]
     }
 
     /// Folds a multilinear polynomial stored in evaluation form along the last `k` variables.
@@ -183,36 +167,27 @@ where
     {
         let folding_factor = folding_randomness.num_variables();
         let evals = self
-            .evals
+            .0
             .par_chunks_exact(1 << folding_factor)
             .map(|ev| eval_multilinear(ev, folding_randomness))
             .collect();
 
-        EvaluationsList {
-            evals,
-            num_variables: self.num_variables() - folding_factor,
-        }
+        EvaluationsList::new(evals)
     }
 
     #[must_use]
     #[instrument(skip_all)]
     pub fn parallel_clone(&self) -> Self {
-        let mut evals = unsafe { uninitialized_vec(self.evals.len()) };
-        parallel_clone(&self.evals, &mut evals);
-        Self {
-            evals,
-            num_variables: self.num_variables,
-        }
+        let mut evals = unsafe { uninitialized_vec(self.0.len()) };
+        parallel_clone(&self.0, &mut evals);
+        Self(evals)
     }
 
     /// Multiply the polynomial by a scalar factor.
     #[must_use]
     pub fn scale<EF: ExtensionField<F>>(&self, factor: EF) -> EvaluationsList<EF> {
-        let evals = self.evals.par_iter().map(|&e| factor * e).collect();
-        EvaluationsList {
-            evals,
-            num_variables: self.num_variables(),
-        }
+        let evals = self.0.par_iter().map(|&e| factor * e).collect();
+        EvaluationsList(evals)
     }
 }
 
@@ -220,7 +195,7 @@ impl<F> Deref for EvaluationsList<F> {
     type Target = [F];
 
     fn deref(&self) -> &Self::Target {
-        &self.evals
+        &self.0
     }
 }
 
