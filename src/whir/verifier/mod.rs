@@ -56,7 +56,7 @@ where
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement_a: &Statement<EF>,
-        parsed_commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        parsed_commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
         statement_b: &Statement<EF>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
@@ -497,7 +497,7 @@ where
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         params: &RoundConfig<F>,
         commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        commitment_b: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Constraint<EF>>>
@@ -549,10 +549,10 @@ where
             &commitment_b.root,
             &stir_challenges_indexes,
             &dimensions_b,
-            leafs_base_field,
+            false,
             round_index,
             vars_diff,
-        )?;
+        ).unwrap();
 
         // Compute STIR Constraints
         let folds: Vec<_> = answers_a
@@ -667,7 +667,11 @@ where
         } else {
             // Merkle leaves
             let mut answers = vec![];
-            let merkle_leaf_size = 1 << self.folding_factor.at_round(round_index);
+            let merkle_leaf_size = if round_index == 0 {
+                1 << (self.folding_factor.at_round(round_index) - var_shift)
+            } else {
+                1 << self.folding_factor.at_round(round_index)
+            };
             for _ in 0..indices.len() {
                 answers.push(verifier_state.receive_hint_extension_scalars(merkle_leaf_size)?);
             }

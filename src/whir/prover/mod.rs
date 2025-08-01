@@ -100,11 +100,7 @@ where
     /// # Panics
     /// - Panics if OOD lengths are inconsistent
     /// - Panics if OOD data is non-empty despite `initial_statement = false`
-    fn validate_witness(
-        &self,
-        witness: &Witness<F, EF, DIGEST_ELEMS>,
-        polynomial: &[F],
-    ) -> bool {
+    fn validate_witness(&self, witness: &Witness<F, EF, DIGEST_ELEMS>, polynomial: &[F]) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         polynomial.num_variables() == self.num_variables
     }
@@ -169,8 +165,8 @@ where
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &[F],
         statement_b: Statement<EF>,
-        witness_b: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial_b: &[F],
+        witness_b: Witness<EF, EF, DIGEST_ELEMS>,
+        polynomial_b: &[EF],
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -319,28 +315,58 @@ where
             None => {
                 if round_state.commitment_merkle_prover_data_b.is_some() {
                     let mut answers_a = Vec::<Vec<F>>::new();
-                    let mut answers_b = Vec::<Vec<F>>::new();
+                    let mut answers_b = Vec::<Vec<EF>>::new();
 
-                    for (answers, commitment_merkle_prover_data) in [
-                        (&mut answers_a, &round_state.commitment_merkle_prover_data_a),
-                        (
-                            &mut answers_b,
-                            round_state
-                                .commitment_merkle_prover_data_b
-                                .as_ref()
-                                .unwrap(),
-                        ),
-                    ] {
+                    // for (answers, commitment_merkle_prover_data) in [
+                    //     (&mut answers_a, &round_state.commitment_merkle_prover_data_a),
+                    //     (
+                    //         &mut answers_b,
+                    //         round_state
+                    //             .commitment_merkle_prover_data_b
+                    //             .as_ref()
+                    //             .unwrap(),
+                    //     ),
+                    // ] {
+
+                    {
                         let mut merkle_proofs = Vec::new();
                         for challenge in &stir_challenges_indexes {
-                            let commitment = extension_mmcs_f
-                                .open_batch(*challenge, commitment_merkle_prover_data);
-                            answers.push(commitment.opened_values[0].clone());
+                            let commitment = extension_mmcs_f.open_batch(
+                                *challenge,
+                                &round_state.commitment_merkle_prover_data_a,
+                            );
+                            answers_a.push(commitment.opened_values[0].clone());
                             merkle_proofs.push(commitment.opening_proof);
                         }
 
                         // merkle leaves
-                        for answer in answers {
+                        for answer in &answers_a {
+                            prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
+                        }
+
+                        // merkle authentication proof
+                        for merkle_proof in &merkle_proofs {
+                            for digest in merkle_proof {
+                                prover_state.hint_base_scalars(digest);
+                            }
+                        }
+                    }
+                    {
+                        let mut merkle_proofs = Vec::new();
+                        for challenge in &stir_challenges_indexes {
+                            let commitment = extension_mmcs_ef.open_batch(
+                                *challenge,
+                                round_state
+                                    .commitment_merkle_prover_data_b
+                                    .as_ref()
+                                    .unwrap(),
+                            );
+                            answers_b.push(commitment.opened_values[0].clone());
+                            merkle_proofs.push(commitment.opening_proof);
+                        }
+
+                        // merkle leaves
+                        for answer in &answers_b {
                             prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
                         }
 
@@ -358,11 +384,9 @@ where
                             [..round_state.folding_randomness.len() - 1]
                             .to_vec();
                         let vars_b = answer_b.len().ilog2() as usize;
-                        let eval_a = answer_a
-                            .evaluate(&MultilinearPoint(a_trunc));
+                        let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
                         let b_trunc = round_state.folding_randomness[..vars_b].to_vec();
-                        let eval_b = answer_b
-                            .evaluate(&MultilinearPoint(b_trunc));
+                        let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
                         let last_fold_rand_a = round_state.folding_randomness
                             [round_state.folding_randomness.len() - 1];
                         let last_fold_rand_b = round_state.folding_randomness[vars_b..]
@@ -399,10 +423,7 @@ where
                     // Evaluate answers in the folding randomness.
                     let mut stir_evaluations = Vec::with_capacity(answers.len());
                     for answer in &answers {
-                        stir_evaluations.push(
-                            answer
-                                .evaluate(&round_state.folding_randomness),
-                        );
+                        stir_evaluations.push(answer.evaluate(&round_state.folding_randomness));
                     }
 
                     stir_evaluations
@@ -433,10 +454,7 @@ where
                 // Evaluate answers in the folding randomness.
                 let mut stir_evaluations = Vec::with_capacity(answers.len());
                 for answer in &answers {
-                    stir_evaluations.push(
-                        answer
-                            .evaluate(&round_state.folding_randomness),
-                    );
+                    stir_evaluations.push(answer.evaluate(&round_state.folding_randomness));
                 }
 
                 stir_evaluations
@@ -465,7 +483,7 @@ where
             &stir_combination_randomness,
         );
 
-        let folding_randomness = round_state.sumcheck_prover.compute_sumcheck_polynomials(
+        let folding_randomness = round_state.sumcheck_prover.compute_sumcheck_polynomials::<PF<EF>>(
             prover_state,
             folding_factor_next,
             round_params.folding_pow_bits,
@@ -592,7 +610,7 @@ where
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
             let final_folding_randomness =
-                round_state.sumcheck_prover.compute_sumcheck_polynomials(
+                round_state.sumcheck_prover.compute_sumcheck_polynomials::<PF<EF>>(
                     prover_state,
                     self.final_sumcheck_rounds,
                     self.final_folding_pow_bits,

@@ -1,4 +1,4 @@
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{ExtensionField, Field};
 use rayon::prelude::*;
 use tracing::instrument;
 
@@ -171,24 +171,18 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct SumcheckSingle<F, EF> {
+pub struct SumcheckSingle<EF> {
     /// Evaluations of the polynomial `p(X)`.
     pub(crate) evals: Vec<EF>,
     /// Evaluations of the equality polynomial used for enforcing constraints.
     pub(crate) weights: Vec<EF>,
     /// Accumulated sum incorporating equality constraints.
     pub(crate) sum: EF,
-    /// Marker for phantom type parameter `F`.
-    phantom: std::marker::PhantomData<F>,
 }
 
-impl<F, EF> SumcheckSingle<F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
+impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
     #[instrument(skip_all)]
-    pub fn from_base_evals(
+    pub fn from_base_evals<F: Field>(
         evals: &[F],
         statement: &Statement<EF>,
         combination_randomness: EF,
@@ -198,8 +192,7 @@ where
         pow_bits: usize,
     ) -> (Self, MultilinearPoint<EF>)
     where
-        F: TwoAdicField,
-        EF: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: ExtensionField<F>,
     {
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
@@ -222,7 +215,6 @@ where
             evals,
             weights,
             sum,
-            phantom: std::marker::PhantomData,
         };
 
         (sumcheck, MultilinearPoint(res))
@@ -251,11 +243,7 @@ where
                 .iter()
                 .zip(combination_randomness.iter())
                 .for_each(|(point, &rand)| {
-                    crate::utils::compute_eval_eq::<_, _, true>(
-                        point,
-                        &mut self.weights,
-                        rand,
-                    );
+                    crate::utils::compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
                 });
         });
 
@@ -266,12 +254,14 @@ where
             .sum::<EF>();
     }
 
-    pub fn add_new_base_equality(
+    pub fn add_new_base_equality<F: Field>(
         &mut self,
         points: &[MultilinearPoint<F>],
         evaluations: &[EF],
         combination_randomness: &[EF],
-    ) {
+    ) where
+        EF: ExtensionField<F>,
+    {
         assert_eq!(combination_randomness.len(), points.len());
         assert_eq!(evaluations.len(), points.len());
 
@@ -296,16 +286,14 @@ where
     }
 
     #[instrument(skip_all)]
-    pub fn compute_sumcheck_polynomials(
+    pub fn compute_sumcheck_polynomials<F: Field>(
         &mut self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         pow_bits: usize,
     ) -> MultilinearPoint<EF>
     where
-        F: TwoAdicField,
-        EF: TwoAdicField,
-        EF: ExtensionField<PF<EF>>,
+        EF: ExtensionField<F>,
     {
         let mut res = (0..folding_factor)
             .map(|_| {
