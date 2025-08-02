@@ -2,8 +2,7 @@ use p3_field::{ExtensionField, Field};
 use tracing::instrument;
 
 use crate::{
-    poly::multilinear::MultilinearPoint,
-    utils::{compute_eval_eq, uninitialized_vec},
+    poly::multilinear::MultilinearPoint, utils::compute_structured_eval_eq,
     whir::statement::constraint::Constraint,
 };
 
@@ -130,24 +129,15 @@ impl<F: Field> Statement<F> {
         // Alloc memory without initializing it to zero.
         // This is safe because there is at least one constraint (otherwise it would return early),
         // and the first iteration of the loop will overwrite the entire vector.
-        let mut combined_evals = unsafe { uninitialized_vec::<F>(1 << self.num_variables) };
-        let (combined_sum, _) = self.constraints.iter().enumerate().fold(
+        let mut combined_evals = F::zero_vec(1 << self.num_variables);
+        let (combined_sum, _) = self.constraints.iter().fold(
             (F::ZERO, F::ONE),
-            |(mut acc_sum, gamma_pow), (i, constraint)| {
-                if i == 0 {
-                    // first iteration: combined_evals must be overwritten
-                    compute_eval_eq::<Base, F, false>(
-                        &constraint.weights,
-                        &mut combined_evals,
-                        gamma_pow,
-                    );
-                } else {
-                    compute_eval_eq::<Base, F, true>(
-                        &constraint.weights,
-                        &mut combined_evals,
-                        gamma_pow,
-                    );
-                }
+            |(mut acc_sum, gamma_pow), constraint| {
+                compute_structured_eval_eq::<Base, F>(
+                    &constraint.weights,
+                    &mut combined_evals,
+                    gamma_pow,
+                );
                 acc_sum += constraint.sum * gamma_pow;
                 (acc_sum, gamma_pow * challenge)
             },

@@ -273,7 +273,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
                 .iter()
                 .zip(combination_randomness.iter())
                 .for_each(|(point, &rand)| {
-                    crate::utils::eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
+                    crate::utils::compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
                 });
         });
 

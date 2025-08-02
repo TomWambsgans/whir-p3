@@ -59,7 +59,7 @@ fn main() {
 
     let vars_diff = 3;
 
-    let num_variables_a = 25;
+    let num_variables_a = 24;
     let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
@@ -82,7 +82,7 @@ fn main() {
         merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
-        rs_domain_initial_reduction_factor: 3,
+        rs_domain_initial_reduction_factor: 5,
         base_field: PhantomData::<BaseFieldA>,
         extension_field: PhantomData::<EF>,
     };
@@ -123,12 +123,27 @@ fn main() {
         .map(|_| rng.random())
         .collect::<Vec<BaseFieldB>>();
 
+    let random_structured_point = |rng: &mut StdRng, num_variables: usize| {
+        let mut point = (0..num_variables)
+            .map(|_| rng.random())
+            .collect::<Vec<EF>>();
+        let initial_booleans = rng.random_range(0..num_variables / 4);
+        for i in 0..initial_booleans {
+            point[i] = EF::from_usize(rng.random_range(0..2));
+        }
+        let final_booleans = rng.random_range(0..num_variables / 4);
+        for i in (num_variables - final_booleans)..num_variables {
+            point[i] = EF::from_usize(rng.random_range(0..2));
+        }
+        MultilinearPoint(point)
+    };
+
     // Sample `num_points` random multilinear points in the Boolean hypercube
-    let points_a = (0..3)
-        .map(|_| MultilinearPoint::rand(&mut rng, num_variables_a))
+    let points_a = (0..7)
+        .map(|_| random_structured_point(&mut rng, num_variables_a))
         .collect::<Vec<_>>();
-    let points_b = (0..2)
-        .map(|_| MultilinearPoint::rand(&mut rng, num_variables_b))
+    let points_b = (0..9)
+        .map(|_| random_structured_point(&mut rng, num_variables_b))
         .collect::<Vec<_>>();
 
     // Construct a new statement with the correct number of variables

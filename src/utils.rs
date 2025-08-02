@@ -13,6 +13,55 @@ const LOG_NUM_THREADS: usize = 5;
 /// The number of threads to spawn for parallel computations.
 const NUM_THREADS: usize = 1 << LOG_NUM_THREADS;
 
+#[inline]
+pub(crate) fn compute_structured_eval_eq<F, EF>(eval: &[EF], out: &mut [EF], scalar: EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    let boolean_starts = eval
+        .iter()
+        .take_while(|&&x| x.is_zero() || x.is_one())
+        .map(|&x| x.is_one())
+        .collect::<Vec<_>>();
+    let starts_big_endian = boolean_starts
+        .iter()
+        .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
+
+    let mut boolean_ends = eval
+        .iter()
+        .rev()
+        .take_while(|&&x| x.is_zero() || x.is_one())
+        .map(|&x| x.is_one())
+        .collect::<Vec<_>>();
+    boolean_ends.reverse();
+    let ends_big_endian = boolean_ends
+        .iter()
+        .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
+
+    let eval = &eval[boolean_starts.len()..];
+    let new_out_size = 1 << eval.len();
+    let out = &mut out[starts_big_endian * new_out_size..(starts_big_endian + 1) * new_out_size];
+
+    if boolean_ends.len() == 0 {
+        compute_eval_eq::<F, EF, true>(eval, out, scalar);
+    } else {
+        let mut buff = unsafe { uninitialized_vec::<EF>(out.len() >> boolean_ends.len()) };
+        compute_eval_eq::<F, EF, false>(
+            &eval[..eval.len() - boolean_ends.len()],
+            &mut buff,
+            scalar,
+        );
+        out[ends_big_endian..]
+            .par_iter_mut()
+            .step_by(1 << boolean_ends.len())
+            .zip(buff.into_par_iter())
+            .for_each(|(o, v)| {
+                *o += v;
+            });
+    }
+}
+
 /// Computes the equality polynomial evaluations efficiently.
 ///
 /// Given an evaluation point vector `eval`, the function computes
@@ -28,8 +77,11 @@ const NUM_THREADS: usize = 1 << LOG_NUM_THREADS;
 /// - false: the result is directly set to the `out` buffer
 /// - true: the result is added to the `out` buffer
 #[inline]
-pub(crate) fn compute_eval_eq<F, EF, const INITIALIZED: bool>(eval: &[EF], out: &mut [EF], scalar: EF)
-where
+pub(crate) fn compute_eval_eq<F, EF, const INITIALIZED: bool>(
+    eval: &[EF],
+    out: &mut [EF],
+    scalar: EF,
+) where
     F: Field,
     EF: ExtensionField<F>,
 {
@@ -111,8 +163,11 @@ where
 /// - false: the result is directly set to the `out` buffer
 /// - true: the result is added to the `out` buffer
 #[inline]
-pub(crate) fn eval_eq_base<F, EF, const INITIALIZED: bool>(eval: &[F], out: &mut [EF], scalar: EF)
-where
+pub(crate) fn compute_eval_eq_base<F, EF, const INITIALIZED: bool>(
+    eval: &[F],
+    out: &mut [EF],
+    scalar: EF,
+) where
     F: Field,
     EF: ExtensionField<F>,
 {
@@ -919,5 +974,38 @@ pub unsafe fn uninitialized_vec<A>(len: usize) -> Vec<A> {
         let mut vec = Vec::with_capacity(len);
         vec.set_len(len);
         vec
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    type F = p3_koala_bear::KoalaBear;
+
+    #[test]
+    fn test() {
+        let eval = vec![
+            F::ZERO,
+            F::ONE,
+            F::ONE,
+            F::ZERO,
+            F::new(96),
+            F::new(85),
+            F::new(1),
+            F::new(854),
+            F::new(2),
+            F::ONE,
+            F::ZERO,
+            F::ONE,
+            F::ONE,
+            F::ONE,
+            F::ZERO,
+        ];
+        let scalar = F::new(789);
+        let mut out_structured = F::zero_vec(1 << eval.len());
+        let mut out_unstructured = F::zero_vec(1 << eval.len());
+        compute_structured_eval_eq(&eval, &mut out_structured, scalar);
+        compute_eval_eq::<F, F, true>(&eval, &mut out_unstructured, scalar);
+        assert_eq!(out_structured, out_unstructured);
     }
 }
