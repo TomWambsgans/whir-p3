@@ -45,11 +45,6 @@ impl<F: Field> WhirDensePolynomial<F> {
 
     /// Evaluates `self` at the given `point` in `Self::Point`.
     pub fn evaluate<EF: ExtensionField<F>>(&self, point: EF) -> EF {
-        if self.is_zero() {
-            return EF::ZERO;
-        } else if point.is_zero() {
-            return EF::from(self.coeffs[0]);
-        }
         self.horner_evaluate(point)
     }
 
@@ -220,9 +215,6 @@ impl<F: Field> Mul for &WhirDensePolynomial<F> {
     ///
     /// A new `WhirDensePolynomial<F>` representing the product of the two input polynomials.
     fn mul(self, other: Self) -> WhirDensePolynomial<F> {
-        if self.is_zero() || other.is_zero() {
-            return WhirDensePolynomial::default();
-        }
         let mut prod = vec![F::ZERO; self.coeffs.len() + other.coeffs.len() - 1];
         for i in 0..self.coeffs.len() {
             for j in 0..other.coeffs.len() {
