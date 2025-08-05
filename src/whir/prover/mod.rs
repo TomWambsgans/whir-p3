@@ -5,7 +5,6 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
-use rand::distr::{Distribution, StandardUniform};
 use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
@@ -177,7 +176,6 @@ where
             + Sync,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<EF>: TwoAdicField,
-        StandardUniform: Distribution<EF>,
     {
         // Xn PolA + (1 - Xn) PolB
 
@@ -483,11 +481,13 @@ where
             &stir_combination_randomness,
         );
 
-        let folding_randomness = round_state.sumcheck_prover.compute_sumcheck_polynomials::<PF<EF>>(
-            prover_state,
-            folding_factor_next,
-            round_params.folding_pow_bits,
-        );
+        let folding_randomness = round_state
+            .sumcheck_prover
+            .compute_sumcheck_polynomials::<PF<EF>>(
+                prover_state,
+                folding_factor_next,
+                round_params.folding_pow_bits,
+            );
 
         let start_idx = self.folding_factor.total_number(round_index);
         let dst_randomness =
@@ -609,8 +609,9 @@ where
 
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
-            let final_folding_randomness =
-                round_state.sumcheck_prover.compute_sumcheck_polynomials::<PF<EF>>(
+            let final_folding_randomness = round_state
+                .sumcheck_prover
+                .compute_sumcheck_polynomials::<PF<EF>>(
                     prover_state,
                     self.final_sumcheck_rounds,
                     self.final_folding_pow_bits,
