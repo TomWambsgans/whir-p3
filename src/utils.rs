@@ -77,7 +77,7 @@ where
 /// - false: the result is directly set to the `out` buffer
 /// - true: the result is added to the `out` buffer
 #[inline]
-pub(crate) fn compute_eval_eq<F, EF, const INITIALIZED: bool>(
+pub fn compute_eval_eq<F, EF, const INITIALIZED: bool>(
     eval: &[EF],
     out: &mut [EF],
     scalar: EF,
@@ -163,7 +163,7 @@ pub(crate) fn compute_eval_eq<F, EF, const INITIALIZED: bool>(
 /// - false: the result is directly set to the `out` buffer
 /// - true: the result is added to the `out` buffer
 #[inline]
-pub(crate) fn compute_eval_eq_base<F, EF, const INITIALIZED: bool>(
+pub fn compute_eval_eq_base<F, EF, const INITIALIZED: bool>(
     eval: &[F],
     out: &mut [EF],
     scalar: EF,
