@@ -121,6 +121,10 @@ where
         self.challenger.sample_algebra_element()
     }
 
+    pub fn sample_vec(&mut self, len: usize) -> Vec<EF> {
+        (0..len).map(|_| self.sample()).collect()
+    }
+
     /// Sample random bits from the challenger.
     ///
     /// # Arguments
