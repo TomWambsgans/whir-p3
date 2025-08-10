@@ -139,9 +139,11 @@ fn main() {
     };
 
     // Sample `num_points` random multilinear points in the Boolean hypercube
-    let points_a = (0..7)
+    let mut points_a = (0..7)
         .map(|_| random_structured_point(&mut rng, num_variables_a))
         .collect::<Vec<_>>();
+    points_a.push(MultilinearPoint(vec![EF::ONE; num_variables_a]));
+    points_a.push(MultilinearPoint(vec![EF::ZERO; num_variables_a]));
     let points_b = (0..9)
         .map(|_| random_structured_point(&mut rng, num_variables_b))
         .collect::<Vec<_>>();

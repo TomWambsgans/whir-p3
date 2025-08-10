@@ -28,6 +28,12 @@ where
         .iter()
         .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
 
+    if boolean_starts.len() == eval.len() {
+        // full of booleans
+        out[starts_big_endian] += scalar;
+        return;
+    }
+
     let mut boolean_ends = eval
         .iter()
         .rev()
