@@ -1,11 +1,12 @@
 use std::borrow::Borrow;
 
+use itertools::Itertools;
 use p3_field::{ExtensionField, Field};
-use rayon::prelude::*;
+use rayon::{join, prelude::*};
 use tracing::instrument;
 
 use super::multilinear::MultilinearPoint;
-use crate::utils::compute_eval_eq;
+use crate::utils::{compute_eval_eq, uninitialized_vec};
 
 /// Given `evals` = (α_1, ..., α_n), returns a multilinear polynomial P in n variables,
 /// defined on the boolean hypercube by: ∀ (x_1, ..., x_n) ∈ {0, 1}^n,
@@ -67,26 +68,45 @@ pub fn scale_poly<F: Field, EF: ExtensionField<F>>(poly: &[F], factor: EF) -> Ve
     poly.par_iter().map(|&e| factor * e).collect()
 }
 
-/// Evaluates a multilinear polynomial at `point ∈ [0,1]^n` using fast interpolation.
-///
-/// - Given evaluations `evals` over `{0,1}^n`, computes `f(point)` via iterative interpolation.
-/// - Uses the recurrence: `f(x_1, ..., x_n) = (1 - x_1) f_0 + x_1 f_1`, reducing dimension at each
-///   step.
-/// - Ensures `evals.len() = 2^n` to match the number of variables.
 fn eval_multilinear<F, EF>(evals: &[F], point: &[EF]) -> EF
 where
     F: Field,
     EF: ExtensionField<F>,
 {
+    // Ensure that the number of evaluations matches the number of variables in the point.
+    //
+    // This is a critical invariant: `evals.len()` must be exactly `2^point.len()`.
     debug_assert_eq!(evals.len(), 1 << point.len());
+
+    // Select the optimal evaluation strategy based on the number of variables.
     match point {
+        // Case: 0 Variables (Constant Polynomial)
+        //
+        // A polynomial with zero variables is just a constant.
         [] => evals[0].into(),
+
+        // Case: 1 Variable (Linear Interpolation)
+        //
+        // This is the base case for the recursion: f(x) = f(0) * (1-x) + f(1) * x.
+        // The expression is an optimized form: f(0) + x * (f(1) - f(0)).
         [x] => *x * (evals[1] - evals[0]) + evals[0],
+
+        // Case: 2 Variables (Bilinear Interpolation)
+        //
+        // This is a fully unrolled version for 2 variables, avoiding recursive calls.
         [x0, x1] => {
+            // Interpolate along the x1-axis for x0=0 to get `a0`.
             let a0 = *x1 * (evals[1] - evals[0]) + evals[0];
+            // Interpolate along the x1-axis for x0=1 to get `a1`.
             let a1 = *x1 * (evals[3] - evals[2]) + evals[2];
+            // Finally, interpolate between `a0` and `a1` along the x0-axis.
             a0 + (a1 - a0) * *x0
         }
+
+        // Cases: 3 and 4 Variables
+        //
+        // These are further unrolled versions for 3 and 4 variables for maximum speed.
+        // The logic is the same as the 2-variable case, just with more steps.
         [x0, x1, x2] => {
             let a00 = *x2 * (evals[1] - evals[0]) + evals[0];
             let a01 = *x2 * (evals[3] - evals[2]) + evals[2];
@@ -113,17 +133,88 @@ where
             let a1 = a10 + *x1 * (a11 - a10);
             a0 + (a1 - a0) * *x0
         }
+
+        // General Case (5+ Variables)
+        //
+        // This handles all other cases, using one of two different strategies.
         [x, tail @ ..] => {
-            let (f0, f1) = evals.split_at(evals.len() / 2);
-            let (f0, f1) = {
-                let work_size: usize = (1 << 15) / std::mem::size_of::<F>();
-                if evals.len() > work_size {
-                    rayon::join(|| eval_multilinear(f0, tail), || eval_multilinear(f1, tail))
-                } else {
-                    (eval_multilinear(f0, tail), eval_multilinear(f1, tail))
-                }
-            };
-            f0 + (f1 - f0) * *x
+            // For a very large number of variables, the recursive approach is not the most efficient.
+            //
+            // We switch to a more direct, non-recursive algorithm that is better suited for wide parallelization.
+            if point.len() >= 20 {
+                // The `evals` are ordered lexicographically, meaning the first variable's bit changes the slowest.
+                //
+                // To align our computation with this memory layout, we process the point's coordinates in reverse.
+                let mut point_rev = point.to_vec();
+                point_rev.reverse();
+
+                // Split the reversed point's coordinates into two halves:
+                // - `z0` (low-order vars)
+                // - `z1` (high-order vars).
+                let mid = point_rev.len() / 2;
+                let (z0, z1) = point_rev.split_at(mid);
+
+                // Precomputation of Basis Polynomials
+                //
+                // The basis polynomial eq(v, p) can be split: eq(v, p) = eq(v_low, p_low) * eq(v_high, p_high).
+                //
+                // We precompute all `2^|z0|` values of eq(v_low, p_low) and store them in `left`.
+                // We precompute all `2^|z1|` values of eq(v_high, p_high) and store them in `right`.
+
+                // Allocate uninitialized memory for the low-order basis polynomial evaluations.
+                let mut left = unsafe { uninitialized_vec(1 << z0.len()) };
+                // Allocate uninitialized memory for the high-order basis polynomial evaluations.
+                let mut right = unsafe { uninitialized_vec(1 << z1.len()) };
+
+                // The `eval_eq` function requires the variables in their original order, so we reverse the halves back.
+                let mut z0_ordered = z0.to_vec();
+                z0_ordered.reverse();
+                // Compute all eq(v_low, p_low) values and fill the `left` vector.
+                compute_eval_eq::<_, _, false>(&z0_ordered, &mut left, EF::ONE);
+
+                // Repeat the process for the high-order variables.
+                let mut z1_ordered = z1.to_vec();
+                z1_ordered.reverse();
+                // Compute all eq(v_high, p_high) values and fill the `right` vector.
+                compute_eval_eq::<_, _, false>(&z1_ordered, &mut right, EF::ONE);
+
+                // Parallelized Final Summation
+                //
+                // This chain of operations computes the regrouped sum:
+                // Σ_{v_high} eq(v_high, p_high) * (Σ_{v_low} f(v_high, v_low) * eq(v_low, p_low))
+                evals
+                    .par_chunks(left.len())
+                    .zip_eq(right.par_iter())
+                    .map(|(part, &c)| {
+                        // This is the inner sum: a dot product between the evaluation chunk and the `left` basis values.
+                        part.iter()
+                            .zip_eq(left.iter())
+                            .map(|(&a, &b)| b * a)
+                            .sum::<EF>()
+                            * c
+                    })
+                    .sum()
+            } else {
+                // For moderately sized inputs (5 to 19 variables), use the recursive strategy.
+                //
+                // Split the evaluations into two halves, corresponding to the first variable being 0 or 1.
+                let (f0, f1) = evals.split_at(evals.len() / 2);
+
+                // Recursively evaluate on the two smaller hypercubes.
+                let (f0_eval, f1_eval) = {
+                    // Only spawn parallel tasks if the subproblem is large enough to overcome
+                    // the overhead of threading.
+                    let work_size: usize = (1 << 15) / std::mem::size_of::<F>();
+                    if evals.len() > work_size {
+                        join(|| eval_multilinear(f0, tail), || eval_multilinear(f1, tail))
+                    } else {
+                        // For smaller subproblems, execute sequentially.
+                        (eval_multilinear(f0, tail), eval_multilinear(f1, tail))
+                    }
+                };
+                // Perform the final linear interpolation for the first variable `x`.
+                f0_eval + (f1_eval - f0_eval) * *x
+            }
         }
     }
 }
