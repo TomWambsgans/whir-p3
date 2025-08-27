@@ -3,7 +3,6 @@ use std::borrow::Borrow;
 use itertools::Itertools;
 use p3_field::{ExtensionField, Field};
 use rayon::{join, prelude::*};
-use tracing::instrument;
 
 use super::multilinear::MultilinearPoint;
 use crate::utils::{compute_eval_eq, uninitialized_vec};
@@ -50,7 +49,6 @@ impl<F: Field, EL: Borrow<[F]>> EvaluationsList<F> for EL {
     }
 }
 
-#[instrument(skip_all)]
 #[must_use]
 pub fn fold_multilinear<F: Field, EF: ExtensionField<F>>(
     poly: &[F],

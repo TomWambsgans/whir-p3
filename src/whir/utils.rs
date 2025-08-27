@@ -1,5 +1,4 @@
 use p3_field::{ExtensionField, Field};
-use tracing::instrument;
 
 use crate::{
     PF,
@@ -46,7 +45,6 @@ pub fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
 /// A utility function to sample Out-of-Domain (OOD) points and evaluate them.
 ///
 /// This should be used on the prover side.
-#[instrument(skip_all)]
 pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E>(
     prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
     num_samples: usize,

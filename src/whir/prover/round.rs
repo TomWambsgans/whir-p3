@@ -1,6 +1,5 @@
 use p3_field::{ExtensionField, TwoAdicField};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use tracing::{info_span, instrument};
 
 use super::Prover;
 use crate::{
@@ -70,7 +69,6 @@ where
     F: ExtensionField<PF<EF>>,
     EF: ExtensionField<PF<EF>>,
 {
-    #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
@@ -102,12 +100,12 @@ where
             prover.starting_folding_pow_bits,
         );
 
-        let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
+        let randomness_vec = {
             let mut randomness_vec = Vec::with_capacity(prover.num_variables);
             randomness_vec.extend(folding_randomness.iter().rev().copied());
             randomness_vec.resize(prover.num_variables, EF::ZERO);
             randomness_vec
-        });
+        };
 
         Ok(Self {
             domain_size: prover.starting_domain_size(),
@@ -124,7 +122,6 @@ where
         })
     }
 
-    #[instrument(skip_all)]
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
@@ -163,7 +160,6 @@ where
 
         let combination_randomness_gen: EF = prover_state.sample();
 
-        let _span = info_span!("merging 2 batched polynomials", n_vars_a, n_vars_b,).entered();
         let mut polynomial = EF::zero_vec(polynomial_a.num_evals() * 2);
         polynomial
             .par_iter_mut()
@@ -179,7 +175,6 @@ where
             .for_each(|(i, eval)| {
                 *eval = EF::from(polynomial_a[i]); // TODO embedding overhead
             });
-        std::mem::drop(_span);
 
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
             &polynomial,
@@ -190,12 +185,12 @@ where
             prover.starting_folding_pow_bits,
         );
 
-        let randomness_vec = info_span!("copy_across_random_vec").in_scope(|| {
+        let randomness_vec = {
             let mut randomness_vec = Vec::with_capacity(prover.num_variables);
             randomness_vec.extend(folding_randomness.iter().rev().copied());
             randomness_vec.resize(prover.num_variables, EF::ZERO);
             randomness_vec
-        });
+        };
 
         Ok(Self {
             domain_size: prover.starting_domain_size(),

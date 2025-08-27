@@ -1,5 +1,4 @@
 use p3_field::{ExtensionField, Field};
-use tracing::instrument;
 
 use crate::{
     poly::multilinear::MultilinearPoint, utils::compute_structured_eval_eq,
@@ -117,7 +116,6 @@ impl<F: Field> Statement<F> {
     /// **Returns:**
     /// - `EvaluationsList<F>`: The combined polynomial `W(X)`.
     /// - `F`: The combined sum `S`.
-    #[instrument(skip_all)]
     pub fn combine<Base>(&self, challenge: F) -> (Vec<F>, F)
     where
         Base: Field,

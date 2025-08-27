@@ -6,7 +6,6 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use serde::{Deserialize, Serialize};
-use tracing::{info_span, instrument};
 
 use super::Witness;
 use crate::{
@@ -49,7 +48,6 @@ where
     /// - Constructs a Merkle tree from the evaluations.
     /// - Computes out-of-domain (OOD) challenge points and their evaluations.
     /// - Returns a `Witness` containing the commitment data.
-    #[instrument(skip_all)]
     pub fn commit(
         &self,
         dft: &EvalsDft<PF<EF>>,
@@ -65,16 +63,13 @@ where
             + Sync,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
-        let evals_repeated = info_span!("repeating evals")
-            .in_scope(|| parallel_repeat(polynomial, 1 << self.starting_log_inv_rate));
+        let evals_repeated = parallel_repeat(polynomial, 1 << self.starting_log_inv_rate);
 
         // Perform DFT on the padded evaluations matrix
         let width = 1 << self.folding_factor.at_round(0);
-        let folded_matrix = info_span!("dft", height = evals_repeated.len() / width, width)
-            .in_scope(|| {
-                dft.dft_algebra_batch_by_evals(RowMajorMatrix::new(evals_repeated, width))
-                    .to_row_major_matrix()
-            });
+        let folded_matrix = dft
+            .dft_algebra_batch_by_evals(RowMajorMatrix::new(evals_repeated, width))
+            .to_row_major_matrix();
 
         // Commit to the Merkle tree
         let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
@@ -82,8 +77,7 @@ where
             self.merkle_compress.clone(),
         );
         let extension_mmcs_f = ExtensionMmcs::<PF<EF>, F, _>::new(mmcs.clone());
-        let (root, prover_data) =
-            info_span!("commit matrix").in_scope(|| extension_mmcs_f.commit_matrix(folded_matrix));
+        let (root, prover_data) = extension_mmcs_f.commit_matrix(folded_matrix);
 
         prover_state.add_base_scalars(root.as_ref());
 
@@ -92,7 +86,7 @@ where
             prover_state,
             self.committment_ood_samples,
             self.num_variables,
-            |point| info_span!("ood evaluation").in_scope(|| polynomial.evaluate(point)),
+            |point| polynomial.evaluate(point),
         );
 
         // Return the witness containing the polynomial, Merkle tree, and OOD results.
@@ -104,8 +98,7 @@ where
     }
 }
 
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref
-    for Commiter<'_, F, EF, H, C, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for Commiter<'_, F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F>,

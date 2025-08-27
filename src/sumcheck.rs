@@ -1,6 +1,5 @@
 use p3_field::{ExtensionField, Field};
 use rayon::prelude::*;
-use tracing::instrument;
 
 use crate::{
     PF,
@@ -11,7 +10,6 @@ use crate::{
 
 const PARALLEL_THRESHOLD: usize = 4096;
 
-#[instrument(skip_all)]
 pub fn compress_ext<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
     assert_ne!(evals.num_variables(), 0);
 
@@ -122,7 +120,6 @@ pub fn univariate_selectors<F: Field>(n: usize) -> Vec<WhirDensePolynomial<F>> {
         .collect()
 }
 
-#[instrument(skip_all, level = "debug")]
 pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     evals: &[F],
     weights: &Vec<EF>,
@@ -181,7 +178,6 @@ pub struct SumcheckSingle<EF> {
 }
 
 impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
-    #[instrument(skip_all)]
     pub fn from_base_evals<F: Field>(
         evals: &[F],
         statement: &Statement<EF>,
@@ -224,9 +220,6 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         self.evals.num_variables()
     }
 
-    #[instrument(skip_all, fields(
-        num_points = points.len(),
-    ))]
     pub fn add_new_equality(
         &mut self,
         points: &[MultilinearPoint<EF>],
@@ -236,16 +229,12 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         assert_eq!(combination_randomness.len(), points.len());
         assert_eq!(evaluations.len(), points.len());
 
-        use tracing::info_span;
-
-        info_span!("accumulate_weight_buffer").in_scope(|| {
-            points
-                .iter()
-                .zip(combination_randomness.iter())
-                .for_each(|(point, &rand)| {
-                    crate::utils::compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
-                });
-        });
+        points
+            .iter()
+            .zip(combination_randomness.iter())
+            .for_each(|(point, &rand)| {
+                crate::utils::compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
+            });
 
         self.sum += combination_randomness
             .iter()
@@ -265,17 +254,14 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         assert_eq!(combination_randomness.len(), points.len());
         assert_eq!(evaluations.len(), points.len());
 
-        use tracing::info_span;
-
         // Parallel update of weight buffer
-        info_span!("accumulate_weight_buffer_base").in_scope(|| {
-            points
-                .iter()
-                .zip(combination_randomness.iter())
-                .for_each(|(point, &rand)| {
-                    crate::utils::compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
-                });
-        });
+
+        points
+            .iter()
+            .zip(combination_randomness.iter())
+            .for_each(|(point, &rand)| {
+                crate::utils::compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
+            });
 
         // Accumulate the weighted sum (cheap, done sequentially)
         self.sum += combination_randomness
@@ -285,7 +271,6 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
             .sum::<EF>();
     }
 
-    #[instrument(skip_all)]
     pub fn compute_sumcheck_polynomials<F: Field>(
         &mut self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,

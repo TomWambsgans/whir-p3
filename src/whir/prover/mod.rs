@@ -104,7 +104,7 @@ where
         polynomial.num_variables() == self.num_variables
     }
 
-    #[instrument(skip_all)]
+    #[instrument(name = "WHIR prove", skip_all)]
     pub fn prove(
         &self,
         dft: &EvalsDft<PF<EF>>,
@@ -155,7 +155,7 @@ where
         Ok(constraint_eval)
     }
 
-    #[instrument(skip_all)]
+    #[instrument(name = "WHIR batch prove", skip_all)]
     pub fn batch_prove(
         &self,
         dft: &EvalsDft<PF<EF>>,
@@ -208,8 +208,6 @@ where
         Ok(constraint_eval)
     }
 
-    #[instrument(skip_all, fields(round_number = round_index, log_size = self.num_variables - self.folding_factor.total_number(round_index)))]
-    #[allow(clippy::too_many_lines)]
     fn round(
         &self,
         round_index: usize,
@@ -510,7 +508,6 @@ where
         Ok(())
     }
 
-    #[instrument(skip_all)]
     fn final_round(
         &self,
         round_index: usize,
@@ -631,7 +628,6 @@ where
         Ok(())
     }
 
-    #[instrument(skip_all, level = "debug")]
     #[allow(clippy::type_complexity)]
     fn compute_stir_queries(
         &self,

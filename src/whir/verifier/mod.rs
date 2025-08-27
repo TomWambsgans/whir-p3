@@ -6,7 +6,6 @@ use p3_matrix::Dimensions;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
 
 use super::{
     committer::reader::ParsedCommitment, statement::constraint::Constraint,
@@ -49,7 +48,6 @@ where
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
     F: ExtensionField<PF<EF>>,
 {
-    #[instrument(skip_all)]
     #[allow(clippy::too_many_lines)]
     pub fn batch_verify(
         &self,
@@ -216,7 +214,6 @@ where
         Ok(folding_randomness)
     }
 
-    #[instrument(skip_all)]
     #[allow(clippy::too_many_lines)]
     pub fn verify(
         &self,
@@ -544,15 +541,17 @@ where
             height: params.domain_size >> params.folding_factor,
             width: 1 << (params.folding_factor - vars_diff),
         }];
-        let answers_b = self.verify_merkle_proof(
-            verifier_state,
-            &commitment_b.root,
-            &stir_challenges_indexes,
-            &dimensions_b,
-            false,
-            round_index,
-            vars_diff,
-        ).unwrap();
+        let answers_b = self
+            .verify_merkle_proof(
+                verifier_state,
+                &commitment_b.root,
+                &stir_challenges_indexes,
+                &dimensions_b,
+                false,
+                round_index,
+                vars_diff,
+            )
+            .unwrap();
 
         // Compute STIR Constraints
         let folds: Vec<_> = answers_a
