@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, time::Instant};
 
 use p3_challenger::DuplexChallenger;
-use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField};
+use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::QuinticExtensionField};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -26,7 +26,7 @@ use whir_p3::{
 // TODO there is a big overhead embedding overhead in the sumcheck
 
 type F = KoalaBear;
-type EF = BinomialExtensionField<KoalaBear, 8>;
+type EF = QuinticExtensionField<KoalaBear>;
 
 type EFPrimeSubfield = <EF as PrimeCharacteristicRing>::PrimeSubfield;
 
