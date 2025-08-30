@@ -65,6 +65,9 @@ where
             return Err(ProofError::InvalidProof);
         }
 
+        // Optional PoW interaction (grinding resistance)
+        verifier_state.check_pow_grinding(pow_bits)?;
+
         // Sample the next verifier folding randomness rᵢ
         let rand: EF = verifier_state.sample();
 
@@ -73,9 +76,6 @@ where
 
         // Store this round’s randomness
         randomness.push(rand);
-
-        // Optional PoW interaction (grinding resistance)
-        verifier_state.check_pow_grinding(pow_bits)?;
     }
 
     // We should reverse the order of the randomness points:

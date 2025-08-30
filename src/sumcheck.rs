@@ -55,10 +55,10 @@ fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
+    prover_state.pow_grinding(pow_bits);
+
     // Sample verifier challenge.
     let r: EF = prover_state.sample();
-
-    prover_state.pow_grinding(pow_bits);
 
     // Compress polynomials and update the sum.
     let evals = { rayon::join(|| compress(weights, r), || compress_ext(evals, r)).1 };
@@ -95,11 +95,10 @@ fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
-    // Sample verifier challenge.
-    let r: EF = prover_state.sample();
-
     prover_state.pow_grinding(pow_bits);
 
+    // Sample verifier challenge.
+    let r: EF = prover_state.sample();
     // Compress polynomials and update the sum.
     rayon::join(|| compress(evals, r), || compress(weights, r));
 
