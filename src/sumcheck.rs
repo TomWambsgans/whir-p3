@@ -49,13 +49,14 @@ fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     evals: &[F],
     weights: &mut Vec<EF>,
     sum: &mut EF,
-    pow_bits: usize,
+    _pow_bits: usize,
 ) -> (EF, Vec<EF>) {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
-    prover_state.pow_grinding(pow_bits);
+    // TODO: re-enable PoW grinding
+    // prover_state.pow_grinding(pow_bits);
 
     // Sample verifier challenge.
     let r: EF = prover_state.sample();
@@ -89,13 +90,14 @@ fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     evals: &mut Vec<EF>,
     weights: &mut Vec<EF>,
     sum: &mut EF,
-    pow_bits: usize,
+    _pow_bits: usize,
 ) -> EF {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
-    prover_state.pow_grinding(pow_bits);
+    // TODO: re-enable PoW grinding
+    // prover_state.pow_grinding(pow_bits);
 
     // Sample verifier challenge.
     let r: EF = prover_state.sample();

@@ -45,7 +45,7 @@ pub(crate) fn verify_sumcheck_rounds<F, EF>(
     verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
     claimed_sum: &mut EF,
     rounds: usize,
-    pow_bits: usize,
+    _pow_bits: usize,
 ) -> ProofResult<SumcheckRandomness<EF>>
 where
     F: TwoAdicField,
@@ -65,8 +65,8 @@ where
             return Err(ProofError::InvalidProof);
         }
 
-        // Optional PoW interaction (grinding resistance)
-        verifier_state.check_pow_grinding(pow_bits)?;
+        // TODO: re-enable PoW grinding
+        // verifier_state.check_pow_grinding(pow_bits)?;
 
         // Sample the next verifier folding randomness rᵢ
         let rand: EF = verifier_state.sample();
