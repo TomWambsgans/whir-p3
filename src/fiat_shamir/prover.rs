@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 
-use crate::{fiat_shamir::BitsSampler, utils::flatten_scalars_to_base};
+use crate::{fiat_shamir::{BitsSampler, LEAN_ISA_VECTOR_LEN}, utils::flatten_scalars_to_base};
 
 /// State held by the prover in a Fiat-Shamir protocol.
 ///
@@ -19,6 +19,9 @@ pub struct ProverState<F, EF, Challenger> {
     /// Transcript data (proof data) accumulated during protocol execution,
     /// to be sent to the verifier.
     proof_data: Vec<F>,
+
+    // number of empty field elements, added to simplify the recursive proof, but could be removed to reduce proof size
+    n_zeros: usize,
 
     /// Marker to keep track of the extension field type without storing it explicitly.
     _extension_field: std::marker::PhantomData<EF>,
@@ -46,6 +49,7 @@ where
         Self {
             challenger,
             proof_data: Vec::new(),
+            n_zeros: 0,
             _extension_field: std::marker::PhantomData,
         }
     }
@@ -59,6 +63,10 @@ where
     /// This data will be sent to the verifier as part of the proof.
     pub fn proof_data(&self) -> &[F] {
         &self.proof_data
+    }
+
+    pub fn proof_size(&self) -> usize {
+        self.proof_data.len() - self.n_zeros
     }
 
     /// Append base field scalars to the transcript and observe them in the challenger.
@@ -81,7 +89,12 @@ where
     /// - `scalars`: Slice of extension field elements to append.
     pub fn add_extension_scalars(&mut self, scalars: &[EF]) {
         // Flatten each extension scalar into base scalars and delegate.
-        self.add_base_scalars(&flatten_scalars_to_base(scalars));
+        for ef in scalars {
+            let mut base_scalars = ef.as_basis_coefficients_slice().to_vec();
+            self.n_zeros += LEAN_ISA_VECTOR_LEN - base_scalars.len();
+            base_scalars.resize(LEAN_ISA_VECTOR_LEN, F::ZERO);
+            self.add_base_scalars(&base_scalars);
+        }
     }
 
     /// Append a single extension field scalar to the transcript.
@@ -100,6 +113,7 @@ where
     /// # Arguments
     /// - `scalars`: Slice of base field elements to append.
     pub fn hint_base_scalars(&mut self, scalars: &[F]) {
+        assert!(scalars.len() % LEAN_ISA_VECTOR_LEN == 0);
         // Only extend proof data, no challenger observation.
         self.proof_data.extend(scalars);
     }
@@ -109,6 +123,7 @@ where
     /// # Arguments
     /// - `scalars`: Slice of extension field elements to append.
     pub fn hint_extension_scalars(&mut self, scalars: &[EF]) {
+        assert!(scalars.len() % LEAN_ISA_VECTOR_LEN == 0);
         // Flatten extension field scalars and append as base field scalars.
         self.proof_data.extend(flatten_scalars_to_base(scalars));
     }
@@ -151,8 +166,9 @@ where
 
         // Append the witness to the proof data.
         self.proof_data.push(witness);
-        for _ in 0..EF::DIMENSION - 1 {
+        for _ in 0..LEAN_ISA_VECTOR_LEN- 1 {
             self.proof_data.push(F::ZERO);
+            self.n_zeros += 1;
         }
     }
 }

@@ -8,6 +8,8 @@ pub mod pattern;
 pub mod prover;
 pub mod verifier;
 
+const LEAN_ISA_VECTOR_LEN: usize = 8;
+
 /// A trait for types that can sample challenges in a Fiat-Shamir-based protocol.
 ///
 /// This trait abstracts over objects (such as prover or verifier states) that can

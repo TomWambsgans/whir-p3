@@ -232,7 +232,7 @@ fn main() {
         opening_time.as_millis()
     );
     let proof_size =
-        prover_state.proof_data().len() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
+        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
     println!("proof size: {:.2} KiB", proof_size / 1024.0);
     println!("Verification time: {} μs", verify_time.as_micros());
 }

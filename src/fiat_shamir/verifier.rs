@@ -4,7 +4,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
 use crate::{
-    fiat_shamir::{BitsSampler, errors::ProofError},
+    fiat_shamir::{BitsSampler, LEAN_ISA_VECTOR_LEN, errors::ProofError},
     utils::pack_scalars_to_extension,
 };
 
@@ -99,10 +99,13 @@ where
         // Calculate number of base scalars per extension scalar.
         let extension_size = <EF as BasedVectorSpace<F>>::DIMENSION;
 
-        // Read and pack into extension elements.
-        Ok(pack_scalars_to_extension(
-            &self.next_base_scalars_vec(n * extension_size)?,
-        ))
+        let mut res = Vec::new();
+        for _ in 0..n {
+            let base_scalars = self.next_base_scalars_const::<LEAN_ISA_VECTOR_LEN>()?;
+            assert!(base_scalars[extension_size..].iter().all(|&x| x == F::ZERO));
+            res.push(EF::from_basis_coefficients_slice(&base_scalars[..extension_size]).unwrap());
+        }
+        Ok(res)
     }
 
     /// Consume and return `N` extension scalars as a fixed-size array, observing them in the challenger.
@@ -195,13 +198,13 @@ where
         }
 
         // Ensure there is at least one witness element to consume.
-        if self.index > self.proof_data.len() + EF::DIMENSION {
+        if self.index > self.proof_data.len() + LEAN_ISA_VECTOR_LEN {
             return Err(ProofError::ExceededTranscript);
         }
 
         // Consume the next witness element.
         let witness = self.proof_data[self.index];
-        self.index += EF::DIMENSION;
+        self.index += LEAN_ISA_VECTOR_LEN;
 
         // Verify the witness using the challenger.
         if self.challenger.check_witness(bits, witness) {
