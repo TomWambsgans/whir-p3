@@ -54,17 +54,20 @@ impl<F: Field, EL: Borrow<[F]>> EvaluationsList<F> for EL {
         if point.is_empty() {
             return self.as_constant().into();
         }
-        if [EF::ZERO, EF::ONE].contains(&point.last().unwrap()) {
-            tracing::warn!(
-                "TODO, evaluate_sparse has not yet been optimized when booleans not at the start"
-            );
-        }
 
         let initial_booleans = point
             .iter()
             .take_while(|&&x| x == EF::ZERO || x == EF::ONE)
             .map(|&x| if x == EF::ZERO { 0 } else { 1 })
             .collect::<Vec<_>>();
+
+        if initial_booleans.len() != point.len()
+            && [EF::ZERO, EF::ONE].contains(&point.last().unwrap())
+        {
+            tracing::warn!(
+                "TODO, evaluate_sparse has not yet been optimized when booleans not at the start"
+            );
+        }
 
         let offset = initial_booleans.iter().fold(0, |acc, b| (acc << 1) | b);
 
