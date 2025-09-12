@@ -28,6 +28,7 @@ pub trait EvaluationsList<F: Field> {
     fn num_evals(&self) -> usize;
     fn evaluate<EF: ExtensionField<F>>(&self, point: &MultilinearPoint<EF>) -> EF;
     fn as_constant(&self) -> F;
+    fn evaluate_sparse<EF: ExtensionField<F>>(&self, points: &MultilinearPoint<EF>) -> EF;
 }
 
 impl<F: Field, EL: Borrow<[F]>> EvaluationsList<F> for EL {
@@ -46,6 +47,30 @@ impl<F: Field, EL: Borrow<[F]>> EvaluationsList<F> for EL {
     fn as_constant(&self) -> F {
         assert_eq!(self.borrow().len(), 1);
         self.borrow()[0]
+    }
+
+    fn evaluate_sparse<EF: ExtensionField<F>>(&self, point: &MultilinearPoint<EF>) -> EF {
+        assert_eq!(point.len(), self.num_variables());
+        if point.is_empty() {
+            return self.as_constant().into();
+        }
+        if [EF::ZERO, EF::ONE].contains(&point.last().unwrap()) {
+            tracing::warn!(
+                "TODO, evaluate_sparse has not yet been optimized when booleans not at the start"
+            );
+        }
+
+        let initial_booleans = point
+            .iter()
+            .take_while(|&&x| x == EF::ZERO || x == EF::ONE)
+            .map(|&x| if x == EF::ZERO { 0 } else { 1 })
+            .collect::<Vec<_>>();
+
+        let offset = initial_booleans.iter().fold(0, |acc, b| (acc << 1) | b);
+
+        (&self.borrow()[offset << (point.len() - initial_booleans.len())
+            ..((offset + 1) << (point.len() - initial_booleans.len()))])
+            .evaluate(&MultilinearPoint(point[initial_booleans.len()..].to_vec()))
     }
 }
 
@@ -212,6 +237,39 @@ where
                 };
                 // Perform the final linear interpolation for the first variable `x`.
                 f0_eval + (f1_eval - f0_eval) * *x
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_koala_bear::{KoalaBear, QuinticExtensionFieldKB};
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+
+    type F = KoalaBear;
+    type EF = QuinticExtensionFieldKB;
+    use p3_field::PrimeCharacteristicRing;
+
+    use super::*;
+
+    #[test]
+    fn test_evaluate_sparse() {
+        let n_vars = 10;
+        let mut rng = StdRng::seed_from_u64(0);
+        let poly = (0..(1 << n_vars)).map(|_| rng.random()).collect::<Vec<F>>();
+        for n_initial_booleans in 0..n_vars {
+            for rep in 0..1 << n_initial_booleans {
+                let mut point = (0..n_initial_booleans)
+                    .map(|i| EF::from_usize((rep >> i) & 1))
+                    .collect::<Vec<_>>();
+                for _ in n_initial_booleans..n_vars {
+                    point.push(rng.random());
+                }
+                assert_eq!(
+                    poly.evaluate_sparse(&MultilinearPoint(point.clone())),
+                    poly.evaluate(&MultilinearPoint(point))
+                );
             }
         }
     }
