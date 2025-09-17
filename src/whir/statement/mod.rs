@@ -1,7 +1,7 @@
 use p3_field::{ExtensionField, Field};
 
 use crate::{
-    poly::multilinear::MultilinearPoint, utils::compute_structured_eval_eq,
+    poly::multilinear::MultilinearPoint, utils::compute_sparse_eval_eq,
     whir::statement::constraint::Constraint,
 };
 
@@ -131,7 +131,7 @@ impl<F: Field> Statement<F> {
         let (combined_sum, _) = self.constraints.iter().fold(
             (F::ZERO, F::ONE),
             |(mut acc_sum, gamma_pow), constraint| {
-                compute_structured_eval_eq::<Base, F>(
+                compute_sparse_eval_eq::<Base, F>(
                     &constraint.weights,
                     &mut combined_evals,
                     gamma_pow,

@@ -14,7 +14,7 @@ const LOG_NUM_THREADS: usize = 5;
 const NUM_THREADS: usize = 1 << LOG_NUM_THREADS;
 
 #[inline]
-pub(crate) fn compute_structured_eval_eq<F, EF>(eval: &[EF], out: &mut [EF], scalar: EF)
+pub fn compute_sparse_eval_eq<F, EF>(eval: &[EF], out: &mut [EF], scalar: EF)
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -1004,7 +1004,7 @@ mod tests {
         let scalar = F::new(789);
         let mut out_structured = F::zero_vec(1 << eval.len());
         let mut out_unstructured = F::zero_vec(1 << eval.len());
-        compute_structured_eval_eq(&eval, &mut out_structured, scalar);
+        compute_sparse_eval_eq(&eval, &mut out_structured, scalar);
         compute_eval_eq::<F, F, true>(&eval, &mut out_unstructured, scalar);
         assert_eq!(out_structured, out_unstructured);
     }
