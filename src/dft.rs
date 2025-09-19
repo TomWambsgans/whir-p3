@@ -491,7 +491,7 @@ fn zip_par_iter_vec<I: IndexedParallelIterator>(
 ///   - output_2 = 2.x1 - x2
 /// ```
 #[derive(Copy, Clone, Debug)]
-pub struct TwiddleFreeEvalsButterfly;
+struct TwiddleFreeEvalsButterfly;
 
 impl<F: Field> Butterfly<F> for TwiddleFreeEvalsButterfly {
     #[inline]
@@ -510,7 +510,7 @@ impl<F: Field> Butterfly<F> for TwiddleFreeEvalsButterfly {
 /// ```
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
-pub struct DitEvalsButterfly<F>(pub F);
+struct DitEvalsButterfly<F>(pub F);
 
 impl<F: Field> Butterfly<F> for DitEvalsButterfly<F> {
     #[inline]

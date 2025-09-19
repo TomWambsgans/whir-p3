@@ -6,8 +6,6 @@ use rand::{
     distr::{Distribution, StandardUniform},
 };
 
-use super::hypercube::BinaryHypercubePoint;
-
 /// A point `(x_1, ..., x_n)` in `F^n` for some field `F`.
 ///
 /// Often, `x_i` are binary. If strictly binary, `BinaryHypercubePoint` is used.
@@ -39,45 +37,6 @@ where
         self.len()
     }
 
-    /// Converts a `BinaryHypercubePoint` (bit representation) into a `MultilinearPoint`.
-    ///
-    /// This maps each bit in the binary integer to `F::ONE` (1) or `F::ZERO` (0) in the field.
-    ///
-    /// Given `point = b_{n-1} ... b_1 b_0` (big-endian), it produces:
-    /// ```ignore
-    /// [b_{n-1}, b_{n-2}, ..., b_1, b_0]
-    /// ```
-    #[must_use]
-    pub fn from_binary_hypercube_point(point: BinaryHypercubePoint, num_variables: usize) -> Self {
-        Self(
-            (0..num_variables)
-                .rev()
-                .map(|i| F::from_bool((point.0 >> i) & 1 == 1))
-                .collect(),
-        )
-    }
-
-    /// Converts `MultilinearPoint` to a `BinaryHypercubePoint`, assuming values are binary.
-    ///
-    /// The point is interpreted as a binary number:
-    /// ```ignore
-    /// b_{n-1} * 2^{n-1} + b_{n-2} * 2^{n-2} + ... + b_1 * 2^1 + b_0 * 2^0
-    /// ```
-    /// Returns `None` if any coordinate is non-binary.
-    pub fn to_hypercube(&self) -> Option<BinaryHypercubePoint> {
-        self.iter()
-            .try_fold(0, |acc, &coord| {
-                if coord == F::ZERO {
-                    Some(acc << 1)
-                } else if coord == F::ONE {
-                    Some((acc << 1) | 1)
-                } else {
-                    None
-                }
-            })
-            .map(BinaryHypercubePoint)
-    }
-
     /// Converts a univariate evaluation point into a multilinear one.
     ///
     /// Uses the bijection:
@@ -102,31 +61,6 @@ where
 
         res.reverse();
         Self(res)
-    }
-
-    /// Computes the equality polynomial `eq(c, p)`, where `p` is binary.
-    ///
-    /// The **equality polynomial** is defined as:
-    /// ```ignore
-    /// eq(c, p) = ∏ (c_i * p_i + (1 - c_i) * (1 - p_i))
-    /// ```
-    /// which evaluates to `1` if `c == p`, and `0` otherwise.
-    ///
-    /// `p` is interpreted as a **big-endian** binary number.
-    #[must_use]
-    pub fn eq_poly(&self, mut point: BinaryHypercubePoint) -> F {
-        let n_variables = self.num_variables();
-        assert!(*point < (1 << n_variables)); // Ensure correct length
-
-        let mut acc = F::ONE;
-
-        for val in self.iter().rev() {
-            let b = *point % 2;
-            acc *= if b == 1 { *val } else { F::ONE - *val };
-            *point >>= 1;
-        }
-
-        acc
     }
 
     /// Computes `eq(c, p)`, where `p` is a general `MultilinearPoint` (not necessarily binary).

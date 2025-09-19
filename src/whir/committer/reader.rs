@@ -4,10 +4,7 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
-    PF,
-    fiat_shamir::{FSChallenger, errors::ProofResult, verifier::VerifierState},
-    poly::multilinear::{Evaluation, MultilinearPoint},
-    whir::config::WhirConfig,
+    fiat_shamir::{errors::ProofResult, verifier::VerifierState, FSChallenger}, poly::multilinear::{Evaluation, MultilinearPoint}, whir::config::WhirConfig, PF
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.

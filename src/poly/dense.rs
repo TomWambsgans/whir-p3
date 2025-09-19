@@ -13,12 +13,12 @@ use rand::distr::{Distribution, StandardUniform};
 /// Designed for verifier use: avoids parallelism by enforcing sequential Horner evaluation.
 /// The verifier should be run on a cheap device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct WhirDensePolynomial<F: Field> {
+pub struct DensePolynomial<F: Field> {
     /// The coefficient of `x^i` is stored at location `i` in `self.coeffs`.
     pub coeffs: Vec<F>,
 }
 
-impl<F: Field> WhirDensePolynomial<F> {
+impl<F: Field> DensePolynomial<F> {
     /// Constructs a new polynomial from a list of coefficients.
     #[must_use]
     pub fn from_coefficients_slice(coeffs: &[F]) -> Self {
@@ -159,8 +159,8 @@ impl<F: Field> WhirDensePolynomial<F> {
     }
 }
 
-impl<F: Field> Add for &WhirDensePolynomial<F> {
-    type Output = WhirDensePolynomial<F>;
+impl<F: Field> Add for &DensePolynomial<F> {
+    type Output = DensePolynomial<F>;
 
     /// Adds two dense polynomials and returns the resulting polynomial.
     ///
@@ -176,7 +176,7 @@ impl<F: Field> Add for &WhirDensePolynomial<F> {
     /// # Returns
     ///
     /// A new `WhirDensePolynomial<F>` representing the sum of the two input polynomials.
-    fn add(self, other: Self) -> WhirDensePolynomial<F> {
+    fn add(self, other: Self) -> DensePolynomial<F> {
         let (big, small) = if self.coeffs.len() >= other.coeffs.len() {
             (self, other)
         } else {
@@ -186,18 +186,18 @@ impl<F: Field> Add for &WhirDensePolynomial<F> {
         for (i, coeff) in small.coeffs.iter().enumerate() {
             sum[i] += *coeff;
         }
-        WhirDensePolynomial::from_coefficients_vec(sum)
+        DensePolynomial::from_coefficients_vec(sum)
     }
 }
 
-impl<F: Field> AddAssign<&Self> for WhirDensePolynomial<F> {
+impl<F: Field> AddAssign<&Self> for DensePolynomial<F> {
     fn add_assign(&mut self, other: &Self) {
         *self = &*self + other;
     }
 }
 
-impl<F: Field> Mul for &WhirDensePolynomial<F> {
-    type Output = WhirDensePolynomial<F>;
+impl<F: Field> Mul for &DensePolynomial<F> {
+    type Output = DensePolynomial<F>;
 
     /// Multiplies two dense polynomials and returns the resulting polynomial.
     ///
@@ -214,18 +214,18 @@ impl<F: Field> Mul for &WhirDensePolynomial<F> {
     /// # Returns
     ///
     /// A new `WhirDensePolynomial<F>` representing the product of the two input polynomials.
-    fn mul(self, other: Self) -> WhirDensePolynomial<F> {
+    fn mul(self, other: Self) -> DensePolynomial<F> {
         let mut prod = vec![F::ZERO; self.coeffs.len() + other.coeffs.len() - 1];
         for i in 0..self.coeffs.len() {
             for j in 0..other.coeffs.len() {
                 prod[i + j] += self.coeffs[i] * other.coeffs[j];
             }
         }
-        WhirDensePolynomial::from_coefficients_vec(prod)
+        DensePolynomial::from_coefficients_vec(prod)
     }
 }
 
-impl<F: Field> MulAssign<&Self> for WhirDensePolynomial<F> {
+impl<F: Field> MulAssign<&Self> for DensePolynomial<F> {
     fn mul_assign(&mut self, other: &Self) {
         *self = &*self * other;
     }

@@ -5,7 +5,7 @@ use crate::{
     PF,
     fiat_shamir::{FSChallenger, prover::ProverState},
     poly::{
-        dense::WhirDensePolynomial,
+        dense::DensePolynomial,
         evals::EvaluationsList,
         multilinear::{Evaluation, MultilinearPoint},
     },
@@ -113,14 +113,14 @@ fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     r
 }
 
-pub fn univariate_selectors<F: Field>(n: usize) -> Vec<WhirDensePolynomial<F>> {
+pub fn univariate_selectors<F: Field>(n: usize) -> Vec<DensePolynomial<F>> {
     (0..1 << n)
         .into_par_iter()
         .map(|i| {
             let values = (0..1 << n)
                 .map(|j| (F::from_u64(j), if i == j { F::ONE } else { F::ZERO }))
                 .collect::<Vec<_>>();
-            WhirDensePolynomial::lagrange_interpolation(&values).unwrap()
+            DensePolynomial::lagrange_interpolation(&values).unwrap()
         })
         .collect()
 }
@@ -129,7 +129,7 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     evals: &[F],
     weights: &Vec<EF>,
     sum: EF,
-) -> WhirDensePolynomial<EF> {
+) -> DensePolynomial<EF> {
     assert!(evals.num_variables() >= 1);
 
     let (c0, c2) = evals
@@ -147,7 +147,7 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     let eval_1 = c0 + c1 + c2;
     let eval_2 = eval_1 + c1 + c2 + c2.double();
 
-    WhirDensePolynomial::lagrange_interpolation(&[
+    DensePolynomial::lagrange_interpolation(&[
         (F::ZERO, eval_0),
         (F::ONE, eval_1),
         (F::TWO, eval_2),
@@ -173,7 +173,7 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct SumcheckSingle<EF> {
+pub(crate) struct SumcheckSingle<EF> {
     /// Evaluations of the polynomial `p(X)`.
     pub(crate) evals: Vec<EF>,
     /// Evaluations of the equality polynomial used for enforcing constraints.
@@ -183,7 +183,7 @@ pub struct SumcheckSingle<EF> {
 }
 
 impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
-    pub fn from_base_evals<F: Field>(
+    pub(crate) fn from_base_evals<F: Field>(
         evals: &[F],
         statement: &[Evaluation<EF>],
         combination_randomness: EF,
@@ -221,11 +221,11 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         (sumcheck, MultilinearPoint(res))
     }
 
-    pub fn num_variables(&self) -> usize {
+    pub(crate) fn num_variables(&self) -> usize {
         self.evals.num_variables()
     }
 
-    pub fn add_new_equality(
+    pub(crate) fn add_new_equality(
         &mut self,
         points: &[MultilinearPoint<EF>],
         evaluations: &[EF],
@@ -248,7 +248,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
             .sum::<EF>();
     }
 
-    pub fn add_new_base_equality<F: Field>(
+    pub(crate) fn add_new_base_equality<F: Field>(
         &mut self,
         points: &[MultilinearPoint<F>],
         evaluations: &[EF],
@@ -276,7 +276,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
             .sum::<EF>();
     }
 
-    pub fn compute_sumcheck_polynomials<F: Field>(
+    pub(crate) fn compute_sumcheck_polynomials<F: Field>(
         &mut self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,

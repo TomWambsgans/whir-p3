@@ -7,7 +7,7 @@ use crate::{
         errors::{ProofError, ProofResult},
         verifier::VerifierState,
     },
-    poly::{dense::WhirDensePolynomial, multilinear::MultilinearPoint},
+    poly::{dense::DensePolynomial, multilinear::MultilinearPoint},
 };
 
 /// The full vector of folding randomness values, in reverse round order.
@@ -58,7 +58,7 @@ where
         // Extract the 3 evaluations of the quadratic sumcheck polynomial h(X)
         let coeffs: [_; 3] = verifier_state.next_extension_scalars_const()?;
 
-        let poly = WhirDensePolynomial::from_coefficients_vec(coeffs.to_vec());
+        let poly = DensePolynomial::from_coefficients_vec(coeffs.to_vec());
 
         // Verify claimed sum is consistent with polynomial
         if poly.evaluate(EF::ZERO) + poly.evaluate(EF::ONE) != *claimed_sum {
