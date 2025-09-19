@@ -199,12 +199,6 @@ where
     }
 }
 
-impl<F> From<F> for MultilinearPoint<F> {
-    fn from(value: F) -> Self {
-        Self(vec![value])
-    }
-}
-
 impl<F> MultilinearPoint<F>
 where
     StandardUniform: Distribution<F>,
@@ -215,5 +209,21 @@ where
                 .map(|_| rng.sample(StandardUniform))
                 .collect(),
         )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Evaluation<F> {
+    pub point: MultilinearPoint<F>,
+    pub value: F,
+}
+
+impl<F: Field> Evaluation<F> {
+    pub fn new(point: MultilinearPoint<F>, value: F) -> Self {
+        Self { point, value }
+    }
+
+    pub fn num_variables(&self) -> usize {
+        self.point.num_variables()
     }
 }

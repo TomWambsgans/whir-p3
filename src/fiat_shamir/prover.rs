@@ -3,7 +3,10 @@ use std::fmt::Debug;
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 
-use crate::{fiat_shamir::{BitsSampler, LEAN_ISA_VECTOR_LEN}, utils::flatten_scalars_to_base};
+use crate::{
+    fiat_shamir::{BitsSampler, LEAN_ISA_VECTOR_LEN},
+    utils::flatten_scalars_to_base,
+};
 
 /// State held by the prover in a Fiat-Shamir protocol.
 ///
@@ -166,7 +169,7 @@ where
 
         // Append the witness to the proof data.
         self.proof_data.push(witness);
-        for _ in 0..LEAN_ISA_VECTOR_LEN- 1 {
+        for _ in 0..LEAN_ISA_VECTOR_LEN - 1 {
             self.proof_data.push(F::ZERO);
             self.n_zeros += 1;
         }

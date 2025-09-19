@@ -1,16 +1,16 @@
-use p3_field::{ExtensionField, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 use super::Prover;
 use crate::{
     PF,
     fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
-    sumcheck::SumcheckSingle,
-    whir::{
-        committer::{RoundMerkleTree, Witness},
-        statement::Statement,
+    poly::{
+        evals::EvaluationsList,
+        multilinear::{Evaluation, MultilinearPoint},
     },
+    sumcheck::SumcheckSingle,
+    whir::committer::{RoundMerkleTree, Witness},
 };
 
 /// Holds all per-round prover state required during the execution of the WHIR protocol.
@@ -58,7 +58,7 @@ where
 
     /// The accumulated set of linear equality constraints for this round.
     /// Used in computing the weighted sum for the sumcheck polynomial.
-    pub(crate) statement: Statement<EF>,
+    pub(crate) statement: Vec<Evaluation<EF>>,
 }
 
 #[allow(clippy::mismatching_type_param_order)]
@@ -72,7 +72,7 @@ where
     pub(crate) fn initialize_first_round_state<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        mut statement: Statement<EF>,
+        mut statement: Vec<Evaluation<EF>>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &[F],
     ) -> ProofResult<Self> {
@@ -87,7 +87,7 @@ where
             })
             .collect();
 
-        statement.add_constraints_in_front(new_constraints);
+        add_constraints_in_front(&mut statement, new_constraints);
 
         let combination_randomness_gen: EF = prover_state.sample();
 
@@ -125,37 +125,37 @@ where
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
         prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        statement_a: Statement<EF>,
+        statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &[F],
-        statement_b: Statement<EF>,
+        statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF, EF, DIGEST_ELEMS>,
         polynomial_b: &[EF],
     ) -> ProofResult<Self> {
-        let n_vars_a = statement_a.num_variables();
-        let n_vars_b = statement_b.num_variables();
+        let n_vars_a = statement_a[0].num_variables();
+        let n_vars_b = statement_b[0].num_variables();
 
-        let mut statement = Statement::new(statement_a.num_variables() + 1);
+        let mut statement = Vec::new();
 
         for (point, evaluation) in witness_a.ood_points.into_iter().zip(witness_a.ood_answers) {
             let mut point = MultilinearPoint::expand_from_univariate(point, n_vars_a);
             point.push(EF::ONE);
-            statement.add_constraint(point, evaluation);
+            statement.push(Evaluation::new(point, evaluation));
         }
-        for mut constraint in statement_a.constraints {
-            constraint.weights.push(EF::ONE);
-            statement.add_constraint(constraint.weights, constraint.sum);
+        for mut constraint in statement_a {
+            constraint.point.push(EF::ONE);
+            statement.push(constraint);
         }
         for (point, evaluation) in witness_b.ood_points.into_iter().zip(witness_b.ood_answers) {
             let mut point = MultilinearPoint::expand_from_univariate(point, n_vars_b);
             point.extend(vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
-            statement.add_constraint(point, evaluation);
+            statement.push(Evaluation::new(point, evaluation));
         }
-        for mut constraint in statement_b.constraints {
+        for mut constraint in statement_b {
             constraint
-                .weights
+                .point
                 .extend(vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
-            statement.add_constraint(constraint.weights, constraint.sum);
+            statement.push(constraint);
         }
 
         let combination_randomness_gen: EF = prover_state.sample();
@@ -206,4 +206,30 @@ where
             statement,
         })
     }
+}
+
+fn add_constraints_in_front<EF: Field>(
+    statements: &mut Vec<Evaluation<EF>>,
+    constraints: Vec<(MultilinearPoint<EF>, EF)>,
+) {
+    // Store the number of variables expected by this statement.
+    let n = statements[0].num_variables();
+
+    // Preallocate a vector for the converted constraints to avoid reallocations.
+    let mut new_constraints = Vec::with_capacity(constraints.len());
+
+    // Iterate through each (weights, sum) pair in the input.
+    for (weights, sum) in constraints {
+        // Ensure the number of variables in the weight matches the statement.
+        assert_eq!(weights.num_variables(), n);
+
+        // Convert the pair into a full `Constraint` with `defer_evaluation = false`.
+        new_constraints.push(Evaluation {
+            point: weights,
+            value: sum,
+        });
+    }
+
+    // Insert all new constraints at the beginning of the existing list.
+    statements.splice(0..0, new_constraints);
 }

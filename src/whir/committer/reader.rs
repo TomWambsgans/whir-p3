@@ -6,8 +6,8 @@ use p3_symmetric::Hash;
 use crate::{
     PF,
     fiat_shamir::{FSChallenger, errors::ProofResult, verifier::VerifierState},
-    poly::multilinear::MultilinearPoint,
-    whir::{config::WhirConfig, statement::constraint::Constraint},
+    poly::multilinear::{Evaluation, MultilinearPoint},
+    whir::config::WhirConfig,
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -104,13 +104,13 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
     /// Each constraint enforces that the committed polynomial evaluates to the
     /// claimed `ood_answer` at the corresponding `ood_point`, using a univariate
     /// equality weight over `num_variables` inputs.
-    pub fn oods_constraints(&self) -> Vec<Constraint<EF>> {
+    pub fn oods_constraints(&self) -> Vec<Evaluation<EF>> {
         self.ood_points
             .iter()
             .zip(&self.ood_answers)
-            .map(|(&point, &eval)| Constraint {
-                weights: MultilinearPoint::expand_from_univariate(point, self.num_variables),
-                sum: eval,
+            .map(|(&point, &eval)| Evaluation {
+                point: MultilinearPoint::expand_from_univariate(point, self.num_variables),
+                value: eval,
             })
             .collect()
     }

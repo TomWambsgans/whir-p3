@@ -4,8 +4,12 @@ use rayon::prelude::*;
 use crate::{
     PF,
     fiat_shamir::{FSChallenger, prover::ProverState},
-    poly::{dense::WhirDensePolynomial, evals::EvaluationsList, multilinear::MultilinearPoint},
-    whir::statement::Statement,
+    poly::{
+        dense::WhirDensePolynomial,
+        evals::EvaluationsList,
+        multilinear::{Evaluation, MultilinearPoint},
+    },
+    utils::compute_sparse_eval_eq,
 };
 
 const PARALLEL_THRESHOLD: usize = 4096;
@@ -181,9 +185,8 @@ pub struct SumcheckSingle<EF> {
 impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
     pub fn from_base_evals<F: Field>(
         evals: &[F],
-        statement: &Statement<EF>,
+        statement: &[Evaluation<EF>],
         combination_randomness: EF,
-
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         pow_bits: usize,
@@ -194,7 +197,8 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
 
-        let (mut weights, mut sum) = statement.combine::<PF<EF>>(combination_randomness);
+        let (mut weights, mut sum) =
+            combine_statement::<PF<EF>, EF>(statement, combination_randomness);
         // In the first round base field evaluations are folded into extension field elements
         let (r, mut evals) = initial_round(prover_state, evals, &mut weights, &mut sum, pow_bits);
         res.push(r);
@@ -297,4 +301,25 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
 
         MultilinearPoint(res)
     }
+}
+
+fn combine_statement<Base, EF>(statement: &[Evaluation<EF>], challenge: EF) -> (Vec<EF>, EF)
+where
+    Base: Field,
+    EF: ExtensionField<Base>,
+{
+    let num_variables = statement[0].num_variables();
+    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
+
+    let mut combined_evals = EF::zero_vec(1 << num_variables);
+    let (combined_sum, _) = statement.iter().fold(
+        (EF::ZERO, EF::ONE),
+        |(mut acc_sum, gamma_pow), constraint| {
+            compute_sparse_eval_eq::<Base, EF>(&constraint.point, &mut combined_evals, gamma_pow);
+            acc_sum += constraint.value * gamma_pow;
+            (acc_sum, gamma_pow * challenge)
+        },
+    );
+
+    (combined_evals, combined_sum)
 }

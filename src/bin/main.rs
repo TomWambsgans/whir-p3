@@ -10,12 +10,14 @@ use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::Subscr
 use whir_p3::{
     dft::EvalsDft,
     fiat_shamir::{prover::ProverState, verifier::VerifierState},
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    poly::{
+        evals::EvaluationsList,
+        multilinear::{Evaluation, MultilinearPoint},
+    },
     whir::{
         committer::{reader::CommitmentReader, writer::Commiter},
         config::*,
         prover::Prover,
-        statement::Statement,
         verifier::Verifier,
     },
 };
@@ -122,17 +124,17 @@ fn main() {
         .collect::<Vec<_>>();
 
     // Construct a new statement with the correct number of variables
-    let mut statement_a = Statement::<EF>::new(num_variables_a);
-    let mut statement_b = Statement::<EF>::new(num_variables_b);
+    let mut statement_a = Vec::new();
+    let mut statement_b = Vec::new();
 
     // Add constraints for each sampled point (equality constraints)
     for point_a in &points_a {
         let eval = polynomial_a.evaluate(point_a);
-        statement_a.add_constraint(point_a.clone(), eval);
+        statement_a.push(Evaluation::new(point_a.clone(), eval));
     }
     for point_b in &points_b {
         let eval = polynomial_b.evaluate(point_b);
-        statement_b.add_constraint(point_b.clone(), eval);
+        statement_b.push(Evaluation::new(point_b.clone(), eval));
     }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
@@ -190,9 +192,9 @@ fn main() {
         .batch_verify(
             &mut verifier_state,
             &parsed_commitment_a,
-            &statement_a,
+            statement_a,
             &parsed_commitment_b,
-            &statement_b,
+            statement_b,
         )
         .unwrap();
     let verify_time = verif_time.elapsed();

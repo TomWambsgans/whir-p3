@@ -9,12 +9,15 @@ use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
-use super::{committer::Witness, statement::Statement};
+use super::committer::Witness;
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
     fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    poly::{
+        evals::EvaluationsList,
+        multilinear::{Evaluation, MultilinearPoint},
+    },
     utils::{flatten_scalars_to_base, parallel_repeat},
     whir::{
         config::{RoundConfig, WhirConfig},
@@ -79,8 +82,10 @@ where
     ///
     /// # Returns
     /// `true` if the statement structure is valid for this protocol instance.
-    fn validate_statement(&self, statement: &Statement<EF>) -> bool {
-        statement.num_variables() == self.num_variables
+    fn validate_statement(&self, statement: &[Evaluation<EF>]) -> bool {
+        statement
+            .iter()
+            .all(|e| e.num_variables() == self.num_variables)
     }
 
     /// Validates that the witness satisfies the structural requirements of the WHIR prover.
@@ -109,7 +114,7 @@ where
         &self,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        statement: Statement<EF>,
+        statement: Vec<Evaluation<EF>>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &[F],
     ) -> ProofResult<MultilinearPoint<EF>>
@@ -160,10 +165,10 @@ where
         &self,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        statement_a: Statement<EF>,
+        statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &[F],
-        statement_b: Statement<EF>,
+        statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF, EF, DIGEST_ELEMS>,
         polynomial_b: &[EF],
     ) -> ProofResult<MultilinearPoint<EF>>

@@ -7,10 +7,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
 use serde::{Deserialize, Serialize};
 
-use super::{
-    committer::reader::ParsedCommitment, statement::constraint::Constraint,
-    utils::get_challenge_stir_queries,
-};
+use super::{committer::reader::ParsedCommitment, utils::get_challenge_stir_queries};
 use crate::{
     PF,
     fiat_shamir::{
@@ -18,11 +15,13 @@ use crate::{
         errors::{ProofError, ProofResult},
         verifier::VerifierState,
     },
-    poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
+    poly::{
+        evals::EvaluationsList,
+        multilinear::{Evaluation, MultilinearPoint},
+    },
     utils::pack_scalars_to_extension,
     whir::{
         config::{RoundConfig, WhirConfig},
-        statement::Statement,
         verifier::sumcheck::verify_sumcheck_rounds,
     },
 };
@@ -53,9 +52,9 @@ where
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        statement_a: &Statement<EF>,
+        statement_a: Vec<Evaluation<EF>>,
         parsed_commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
-        statement_b: &Statement<EF>,
+        statement_b: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -66,6 +65,17 @@ where
             + Sync,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
+        assert!(
+            statement_a
+                .iter()
+                .all(|c| c.point.len() == parsed_commitment_a.num_variables)
+        );
+        assert!(
+            statement_b
+                .iter()
+                .all(|c| c.point.len() == parsed_commitment_b.num_variables)
+        );
+
         // During the rounds we collect constraints, combination randomness, folding randomness
         // and we update the claimed sum of constraint evaluation.
         let mut round_constraints = Vec::new();
@@ -77,9 +87,9 @@ where
         let mut constraints: Vec<_> = parsed_commitment_a
             .oods_constraints()
             .into_iter()
-            .chain(statement_a.constraints.iter().cloned())
+            .chain(statement_a)
             .map(|mut c| {
-                c.weights.push(EF::ONE);
+                c.point.push(EF::ONE);
                 c
             })
             .collect();
@@ -88,11 +98,11 @@ where
             parsed_commitment_b
                 .oods_constraints()
                 .into_iter()
-                .chain(statement_b.constraints.iter().cloned())
+                .chain(statement_b)
                 .map(|mut c| {
                     let ending_zeros =
                         parsed_commitment_a.num_variables + 1 - parsed_commitment_b.num_variables;
-                    c.weights.extend(vec![EF::ZERO; ending_zeros]);
+                    c.point.extend(vec![EF::ZERO; ending_zeros]);
                     c
                 }),
         );
@@ -142,7 +152,7 @@ where
             };
 
             // Add out-of-domain and in-domain constraints to claimed_sum
-            let constraints: Vec<Constraint<EF>> = new_commitment
+            let constraints: Vec<Evaluation<EF>> = new_commitment
                 .oods_constraints()
                 .into_iter()
                 .chain(stir_constraints.into_iter())
@@ -181,7 +191,7 @@ where
         // Verify stir constraints directly on final polynomial
         stir_constraints
             .iter()
-            .all(|c| c.verify(&final_evaluations))
+            .all(|c| verify_constraint(c, &final_evaluations))
             .then_some(())
             .ok_or(ProofError::InvalidProof)?;
 
@@ -219,7 +229,7 @@ where
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        statement: &Statement<EF>,
+        statement: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -230,6 +240,12 @@ where
             + Sync,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
+        assert!(
+            statement
+                .iter()
+                .all(|c| c.point.len() == parsed_commitment.num_variables)
+        );
+
         // During the rounds we collect constraints, combination randomness, folding randomness
         // and we update the claimed sum of constraint evaluation.
         let mut round_constraints = Vec::new();
@@ -241,7 +257,7 @@ where
         let constraints: Vec<_> = prev_commitment
             .oods_constraints()
             .into_iter()
-            .chain(statement.constraints.iter().cloned())
+            .chain(statement)
             .collect();
         let combination_randomness =
             self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
@@ -277,10 +293,10 @@ where
             )?;
 
             // Add out-of-domain and in-domain constraints to claimed_sum
-            let constraints: Vec<Constraint<EF>> = new_commitment
+            let constraints: Vec<Evaluation<EF>> = new_commitment
                 .oods_constraints()
                 .into_iter()
-                .chain(stir_constraints.into_iter())
+                .chain(stir_constraints)
                 .collect();
 
             let combination_randomness =
@@ -316,7 +332,7 @@ where
         // Verify stir constraints directly on final polynomial
         stir_constraints
             .iter()
-            .all(|c| c.verify(&final_evaluations))
+            .all(|c| verify_constraint(c, &final_evaluations))
             .then_some(())
             .ok_or(ProofError::InvalidProof)?;
 
@@ -369,7 +385,7 @@ where
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         claimed_sum: &mut EF,
-        constraints: &[Constraint<EF>],
+        constraints: &[Evaluation<EF>],
     ) -> ProofResult<Vec<EF>> {
         let combination_randomness_gen: EF = verifier_state.sample();
         let combination_randomness: Vec<_> = combination_randomness_gen
@@ -379,7 +395,7 @@ where
         *claimed_sum += constraints
             .iter()
             .zip(&combination_randomness)
-            .map(|(c, &rand)| rand * c.sum)
+            .map(|(c, &rand)| rand * c.value)
             .sum::<EF>();
 
         Ok(combination_randomness)
@@ -416,7 +432,7 @@ where
         commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
-    ) -> ProofResult<Vec<Constraint<EF>>>
+    ) -> ProofResult<Vec<Evaluation<EF>>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -477,12 +493,11 @@ where
             .iter()
             .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
             .zip(&folds)
-            .map(|(point, &value)| Constraint {
-                weights: MultilinearPoint::expand_from_univariate(
-                    EF::from(point),
-                    params.num_variables,
-                ),
-                sum: value,
+            .map(|(point, &value)| {
+                Evaluation::new(
+                    MultilinearPoint::expand_from_univariate(EF::from(point), params.num_variables),
+                    value,
+                )
             })
             .collect();
 
@@ -497,7 +512,7 @@ where
         commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
-    ) -> ProofResult<Vec<Constraint<EF>>>
+    ) -> ProofResult<Vec<Evaluation<EF>>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -577,12 +592,11 @@ where
             .iter()
             .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
             .zip(&folds)
-            .map(|(point, &value)| Constraint {
-                weights: MultilinearPoint::expand_from_univariate(
-                    EF::from(point),
-                    params.num_variables,
-                ),
-                sum: value,
+            .map(|(point, &value)| {
+                Evaluation::new(
+                    MultilinearPoint::expand_from_univariate(EF::from(point), params.num_variables),
+                    value,
+                )
             })
             .collect();
 
@@ -738,7 +752,7 @@ where
     /// - A deferred constraint is encountered but `deferred` has been exhausted.
     fn eval_constraints_poly(
         &self,
-        constraints: &[(Vec<EF>, Vec<Constraint<EF>>)],
+        constraints: &[(Vec<EF>, Vec<Evaluation<EF>>)],
         mut point: MultilinearPoint<EF>,
     ) -> EF {
         let mut num_variables = self.num_variables;
@@ -754,7 +768,7 @@ where
                 .iter()
                 .zip(randomness)
                 .map(|(constraint, &randomness)| {
-                    let value = constraint.weights.eq_poly_outside(&point);
+                    let value = constraint.point.eq_poly_outside(&point);
                     value * randomness
                 })
                 .sum::<EF>();
@@ -773,4 +787,8 @@ where
     fn deref(&self) -> &Self::Target {
         self.0
     }
+}
+
+fn verify_constraint<EF: Field>(constraint: &Evaluation<EF>, poly: &[EF]) -> bool {
+    poly.evaluate(&constraint.point) == constraint.value
 }
