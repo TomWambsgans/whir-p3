@@ -22,61 +22,56 @@ pub enum FoldingFactorError {
 
 /// Defines the folding factor for polynomial commitments.
 #[derive(Debug, Clone, Copy)]
-pub enum FoldingFactor {
-    /// A fixed folding factor used in all rounds.
-    Constant(usize),
-    /// Uses a different folding factor for the first round and a fixed one for the rest.
-    ConstantFromSecondRound(usize, usize),
+pub struct FoldingFactor {
+    first_round: usize, // batched
+    subsequent_round: usize,
 }
 
 impl FoldingFactor {
+    pub fn constant(factor: usize) -> Self {
+        Self {
+            first_round: factor,
+            subsequent_round: factor,
+        }
+    }
+
+    pub fn new(first_round: usize, subsequent_round: usize) -> Self {
+        Self {
+            first_round,
+            subsequent_round,
+        }
+    }
+
     /// Retrieves the folding factor for a given round.
     #[must_use]
     pub const fn at_round(&self, round: usize) -> usize {
-        match self {
-            Self::Constant(factor) => *factor,
-            Self::ConstantFromSecondRound(first_round_factor, factor) => {
-                if round == 0 {
-                    *first_round_factor
-                } else {
-                    *factor
-                }
-            }
+        if round == 0 {
+            self.first_round
+        } else {
+            self.subsequent_round
         }
     }
 
     /// Checks the validity of the folding factor against the number of variables.
     pub const fn check_validity(&self, num_variables: usize) -> Result<(), FoldingFactorError> {
-        match self {
-            Self::Constant(factor) => {
-                if *factor > num_variables {
-                    // A folding factor cannot be greater than the number of available variables.
-                    Err(FoldingFactorError::TooLarge(*factor, num_variables))
-                } else if *factor == 0 {
-                    // A folding factor of zero is invalid since folding must reduce variables.
-                    Err(FoldingFactorError::ZeroFactor)
-                } else {
-                    Ok(())
-                }
-            }
-            Self::ConstantFromSecondRound(first_round_factor, factor) => {
-                if *first_round_factor > num_variables {
-                    // The first round folding factor must not exceed the available variables.
-                    Err(FoldingFactorError::TooLarge(
-                        *first_round_factor,
-                        num_variables,
-                    ))
-                } else if *factor > num_variables {
-                    // Subsequent round folding factors must also not exceed the available
-                    // variables.
-                    Err(FoldingFactorError::TooLarge(*factor, num_variables))
-                } else if *factor == 0 || *first_round_factor == 0 {
-                    // Folding should occur at least once; zero is not valid.
-                    Err(FoldingFactorError::ZeroFactor)
-                } else {
-                    Ok(())
-                }
-            }
+        if self.first_round > num_variables {
+            // The first round folding factor must not exceed the available variables.
+            Err(FoldingFactorError::TooLarge(
+                self.first_round,
+                num_variables,
+            ))
+        } else if self.subsequent_round > num_variables {
+            // Subsequent round folding factors must also not exceed the available
+            // variables.
+            Err(FoldingFactorError::TooLarge(
+                self.subsequent_round,
+                num_variables,
+            ))
+        } else if self.subsequent_round == 0 || self.first_round == 0 {
+            // Folding should occur at least once; zero is not valid.
+            Err(FoldingFactorError::ZeroFactor)
+        } else {
+            Ok(())
         }
     }
 
@@ -87,56 +82,27 @@ impl FoldingFactor {
         num_variables: usize,
         max_num_variables_to_send_coeffs: usize,
     ) -> (usize, usize) {
-        match self {
-            Self::Constant(factor) => {
-                if num_variables <= max_num_variables_to_send_coeffs {
-                    // the first folding is mandatory in the current implem (TODO don't fold, send directly the polynomial)
-                    return (0, num_variables - factor);
-                }
-                // Starting from `num_variables`, each round reduces the number of variables by `factor`. As soon as the
-                // number of variables is less of equal than `MAX_NUM_VARIABLES_TO_SEND_COEFFS`, we stop folding and the
-                // prover sends directly the coefficients of the polynomial.
-                let num_rounds =
-                    (num_variables - max_num_variables_to_send_coeffs).div_ceil(*factor);
-                let final_sumcheck_rounds = num_variables - num_rounds * factor;
-                // The -1 accounts for the fact that the last round does not require another folding.
-                (num_rounds - 1, final_sumcheck_rounds)
-            }
-            Self::ConstantFromSecondRound(first_round_factor, factor) => {
-                // Compute the number of variables remaining after the first round.
-                let nv_except_first_round = num_variables - *first_round_factor;
-                if nv_except_first_round < max_num_variables_to_send_coeffs {
-                    // This case is equivalent to Constant(first_round_factor)
-                    // the first folding is mandatory in the current implem (TODO don't fold, send directly the polynomial)
-                    return (0, nv_except_first_round);
-                }
-                // Starting from `num_variables`, the first round reduces the number of variables by `first_round_factor`,
-                // and the next ones by `factor`. As soon as the number of variables is less of equal than
-                // `MAX_NUM_VARIABLES_TO_SEND_COEFFS`, we stop folding and the prover sends directly the coefficients of the polynomial.
-                let num_rounds =
-                    (nv_except_first_round - max_num_variables_to_send_coeffs).div_ceil(*factor);
-                let final_sumcheck_rounds = nv_except_first_round - num_rounds * factor;
-                // No need to minus 1 because the initial round is already excepted out
-                (num_rounds, final_sumcheck_rounds)
-            }
+        // Compute the number of variables remaining after the first round.
+        let nv_except_first_round = num_variables - self.first_round;
+        if nv_except_first_round < max_num_variables_to_send_coeffs {
+            // This case is equivalent to Constant(first_round_factor)
+            // the first folding is mandatory in the current implem (TODO don't fold, send directly the polynomial)
+            return (0, nv_except_first_round);
         }
+        // Starting from `num_variables`, the first round reduces the number of variables by `first_round_factor`,
+        // and the next ones by `factor`. As soon as the number of variables is less of equal than
+        // `MAX_NUM_VARIABLES_TO_SEND_COEFFS`, we stop folding and the prover sends directly the coefficients of the polynomial.
+        let num_rounds = (nv_except_first_round - max_num_variables_to_send_coeffs)
+            .div_ceil(self.subsequent_round);
+        let final_sumcheck_rounds = nv_except_first_round - num_rounds * self.subsequent_round;
+        // No need to minus 1 because the initial round is already excepted out
+        (num_rounds, final_sumcheck_rounds)
     }
 
     /// Computes the total number of folding rounds over `n_rounds` iterations.
     #[must_use]
     pub fn total_number(&self, n_rounds: usize) -> usize {
-        match self {
-            Self::Constant(factor) => {
-                // - Each round folds `factor` variables,
-                // - There are `n_rounds + 1` iterations (including the original input size).
-                factor * (n_rounds + 1)
-            }
-            Self::ConstantFromSecondRound(first_round_factor, factor) => {
-                // - The first round folds `first_round_factor` variables,
-                // - Subsequent rounds fold `factor` variables each.
-                first_round_factor + factor * n_rounds
-            }
-        }
+        self.first_round + self.subsequent_round * n_rounds
     }
 }
 

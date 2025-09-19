@@ -13,9 +13,7 @@ use whir_p3::{
     poly::{evals::EvaluationsList, multilinear::MultilinearPoint},
     whir::{
         committer::{reader::CommitmentReader, writer::Commiter},
-        config::{
-            DEFAULT_MAX_POW, FoldingFactor, SecurityAssumption, WhirConfig, WhirConfigBuilder,
-        },
+        config::*,
         prover::Prover,
         statement::Statement,
         verifier::Verifier,
@@ -74,10 +72,7 @@ fn main() {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::ConstantFromSecondRound(
-            folding_factor_first_round_a,
-            folding_factor_after,
-        ),
+        folding_factor: FoldingFactor::new(folding_factor_first_round_a, folding_factor_after),
         merkle_hash: merkle_hash.clone(),
         merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
@@ -91,10 +86,7 @@ fn main() {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::ConstantFromSecondRound(
-            folding_factor_first_round_b,
-            folding_factor_after,
-        ),
+        folding_factor: FoldingFactor::new(folding_factor_first_round_b, folding_factor_after),
         merkle_hash,
         merkle_compress,
         soundness_type: SecurityAssumption::CapacityBound,
@@ -123,7 +115,7 @@ fn main() {
         .map(|_| rng.random())
         .collect::<Vec<BaseFieldB>>();
 
-    let random_structured_point = |rng: &mut StdRng, num_variables: usize| {
+    let random_sparse_point = |rng: &mut StdRng, num_variables: usize| {
         let mut point = (0..num_variables)
             .map(|_| rng.random())
             .collect::<Vec<EF>>();
@@ -140,12 +132,12 @@ fn main() {
 
     // Sample `num_points` random multilinear points in the Boolean hypercube
     let mut points_a = (0..7)
-        .map(|_| random_structured_point(&mut rng, num_variables_a))
+        .map(|_| random_sparse_point(&mut rng, num_variables_a))
         .collect::<Vec<_>>();
     points_a.push(MultilinearPoint(vec![EF::ONE; num_variables_a]));
     points_a.push(MultilinearPoint(vec![EF::ZERO; num_variables_a]));
     let points_b = (0..9)
-        .map(|_| random_structured_point(&mut rng, num_variables_b))
+        .map(|_| random_sparse_point(&mut rng, num_variables_b))
         .collect::<Vec<_>>();
 
     // Construct a new statement with the correct number of variables
