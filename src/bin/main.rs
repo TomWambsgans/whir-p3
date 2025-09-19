@@ -149,15 +149,11 @@ fn main() {
     let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
     let time = Instant::now();
-    let witness_a = Commiter(&params_a)
-        .commit(&dft, &mut prover_state, &polynomial_a)
-        .unwrap();
+    let witness_a = Commiter(&params_a).commit(&dft, &mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
 
     let time = Instant::now();
-    let witness_b = Commiter(&params_b)
-        .commit(&dft, &mut prover_state, &polynomial_b)
-        .unwrap();
+    let witness_b = Commiter(&params_b).commit(&dft, &mut prover_state, &polynomial_b);
     let commit_time_b = time.elapsed();
 
     // Generate a proof for the given statement and witness

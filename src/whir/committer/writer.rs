@@ -11,7 +11,7 @@ use super::Witness;
 use crate::{
     PF, PFPacking,
     dft::EvalsDft,
-    fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
+    fiat_shamir::{FSChallenger, prover::ProverState},
     poly::evals::EvaluationsList,
     utils::parallel_repeat,
     whir::{config::WhirConfig, utils::sample_ood_points},
@@ -53,7 +53,7 @@ where
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         polynomial: &[F],
-    ) -> ProofResult<Witness<F, EF, DIGEST_ELEMS>>
+    ) -> Witness<F, EF, DIGEST_ELEMS>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
@@ -90,11 +90,11 @@ where
         );
 
         // Return the witness containing the polynomial, Merkle tree, and OOD results.
-        Ok(Witness {
+        Witness {
             prover_data,
             ood_points,
             ood_answers,
-        })
+        }
     }
 }
 
