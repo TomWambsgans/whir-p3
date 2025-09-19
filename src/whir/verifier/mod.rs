@@ -19,68 +19,12 @@ use crate::{
     },
     utils::pack_scalars_to_extension,
     whir::{
-        config::{RoundConfig, WhirConfig, WhirConfigBuilder},
+        config::{RoundConfig, WhirConfig},
         verifier::sumcheck::verify_sumcheck_rounds,
     },
 };
 
 mod sumcheck;
-
-impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
-    pub fn verify<F, EF>(
-        &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        statement: Vec<Evaluation<EF>>,
-    ) -> ProofResult<MultilinearPoint<EF>>
-    where
-        F: TwoAdicField + ExtensionField<PF<EF>>,
-        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
-        PF<EF>: TwoAdicField,
-    {
-        WhirConfig::new(self.clone(), parsed_commitment.num_variables).verify(
-            verifier_state,
-            parsed_commitment,
-            statement,
-        )
-    }
-
-    pub fn batch_verify<F, EF>(
-        &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        statement_a: Vec<Evaluation<EF>>,
-        parsed_commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
-        statement_b: Vec<Evaluation<EF>>,
-    ) -> ProofResult<MultilinearPoint<EF>>
-    where
-        F: TwoAdicField + ExtensionField<PF<EF>>,
-        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
-        PF<EF>: TwoAdicField,
-    {
-        WhirConfig::new(self.clone(), parsed_commitment_a.num_variables).batch_verify(
-            verifier_state,
-            parsed_commitment_a,
-            statement_a,
-            parsed_commitment_b,
-            statement_b,
-        )
-    }
-}
 
 impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where

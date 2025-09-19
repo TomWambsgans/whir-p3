@@ -7,7 +7,7 @@ use crate::{
     PF,
     fiat_shamir::{FSChallenger, errors::ProofResult, verifier::VerifierState},
     poly::multilinear::{Evaluation, MultilinearPoint},
-    whir::config::{WhirConfig, WhirConfigBuilder},
+    whir::config::WhirConfig,
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -113,22 +113,6 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
                 value: eval,
             })
             .collect()
-    }
-}
-
-impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
-    pub fn parse_commitment<F, EF>(
-        &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        num_variables: usize,
-    ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>>
-    where
-        F: TwoAdicField + ExtensionField<PF<EF>>,
-        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
-        H: Clone,
-        C: Clone,
-    {
-        WhirConfig::new(self.clone(), num_variables).parse_commitment(verifier_state)
     }
 }
 

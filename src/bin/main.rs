@@ -78,6 +78,8 @@ fn main() {
         num_variables_a,
         num_variables_b,
     );
+    let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
+    let params_b = WhirConfig::new(params_b, num_variables_b);
 
     // println!("Using parameters:\n{}", params.to_string());
 
@@ -137,7 +139,7 @@ fn main() {
 
     // Commit to the polynomial and produce a witness
 
-    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size(num_variables_a));
+    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
     let time = Instant::now();
     let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
@@ -167,10 +169,10 @@ fn main() {
 
     // Parse the commitment
     let parsed_commitment_a = params_a
-        .parse_commitment::<F, EF>(&mut verifier_state, num_variables_a)
+        .parse_commitment(&mut verifier_state)
         .unwrap();
     let parsed_commitment_b = params_b
-        .parse_commitment::<EF, EF>(&mut verifier_state, num_variables_b)
+        .parse_commitment(&mut verifier_state)
         .unwrap();
 
     let verif_time = Instant::now();

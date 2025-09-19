@@ -130,12 +130,6 @@ pub struct WhirConfigBuilder<H, C, const DIGEST_ELEMS: usize> {
     pub merkle_compress: C,
 }
 
-impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
-    pub const fn max_fft_size(&self, num_variables: usize) -> usize {
-        num_variables + self.starting_log_inv_rate - self.folding_factor.at_round(0)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct RoundConfig<F> {
     pub pow_bits: usize,
