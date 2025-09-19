@@ -162,18 +162,17 @@ fn main() {
 
     // Generate a proof for the given statement and witness
     let time = Instant::now();
-    Prover(&params_a)
-        .batch_prove(
-            &dft,
-            &mut prover_state,
-            statement_a.clone(),
-            witness_a,
-            &polynomial_a,
-            statement_b.clone(),
-            witness_b,
-            &polynomial_b,
-        )
-        .unwrap();
+    Prover(&params_a).batch_prove(
+        &dft,
+        &mut prover_state,
+        statement_a.clone(),
+        witness_a,
+        &polynomial_a,
+        statement_b.clone(),
+        witness_b,
+        &polynomial_b,
+    );
+
     let opening_time = time.elapsed();
 
     // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data

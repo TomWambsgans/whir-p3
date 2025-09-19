@@ -171,7 +171,7 @@ where
         statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF, EF, DIGEST_ELEMS>,
         polynomial_b: &[EF],
-    ) -> ProofResult<MultilinearPoint<EF>>
+    ) ->  MultilinearPoint<EF>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
@@ -196,11 +196,11 @@ where
             statement_b,
             witness_b,
             polynomial_b,
-        )?;
+        ).unwrap();
 
         // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
-            self.round(round, dft, prover_state, &mut round_state)?;
+            self.round(round, dft, prover_state, &mut round_state).unwrap();
         }
 
         // Reverse the vector of verifier challenges (used as evaluation point)
@@ -210,7 +210,7 @@ where
         round_state.randomness_vec.reverse();
         let constraint_eval = MultilinearPoint(round_state.randomness_vec);
 
-        Ok(constraint_eval)
+        constraint_eval
     }
 
     fn round(
