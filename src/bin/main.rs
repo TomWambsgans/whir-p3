@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::Instant};
+use std::time::Instant;
 
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
@@ -63,45 +63,26 @@ fn main() {
     let num_coeffs_a = 1 << num_variables_a;
     let num_coeffs_b = 1 << num_variables_b;
 
-    let folding_factor_first_round_a: usize = 7;
-    let folding_factor_first_round_b: usize = folding_factor_first_round_a - vars_diff;
-    let folding_factor_after = 4;
-
     // Construct WHIR protocol parameters
-    let whir_params_a = WhirConfigBuilder {
+    let whir_params = WhirConfigBuilder {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::new(folding_factor_first_round_a, folding_factor_after),
+        folding_factor: FoldingFactor::new(7, 4),
         merkle_hash: merkle_hash.clone(),
         merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,
-        base_field: PhantomData::<BaseFieldA>,
-        extension_field: PhantomData::<EF>,
     };
 
-    let whir_params_b = WhirConfigBuilder {
-        security_level: 128,
-        max_num_variables_to_send_coeffs: 6,
-        pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::new(folding_factor_first_round_b, folding_factor_after),
-        merkle_hash,
-        merkle_compress,
-        soundness_type: SecurityAssumption::CapacityBound,
-        starting_log_inv_rate: 1,
-        rs_domain_initial_reduction_factor: 3,
-        base_field: PhantomData::<BaseFieldB>,
-        extension_field: PhantomData::<EF>,
-    };
-
-    let params_a = WhirConfig::<BaseFieldA, EF, MerkleHash, MerkleCompress, 8>::new(
-        whir_params_a,
-        num_variables_a,
-    );
-    let params_b = WhirConfig::<BaseFieldB, EF, MerkleHash, MerkleCompress, 8>::new(
-        whir_params_b,
+    let params_a = WhirConfig::new(whir_params.clone(), num_variables_a);
+    let params_b = WhirConfig::new(
+        second_batched_whir_config_builder::<BaseFieldB, EF, _, _, _>(
+            whir_params,
+            num_variables_a,
+            num_variables_b,
+        ),
         num_variables_b,
     );
 

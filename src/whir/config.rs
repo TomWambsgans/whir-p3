@@ -108,7 +108,7 @@ impl FoldingFactor {
 
 /// Configuration parameters for WHIR proofs.
 #[derive(Clone, Debug)]
-pub struct WhirConfigBuilder<F, EF, H, C, const DIGEST_ELEMS: usize> {
+pub struct WhirConfigBuilder<H, C, const DIGEST_ELEMS: usize> {
     /// The logarithmic inverse rate for sampling.
     pub starting_log_inv_rate: usize,
     pub max_num_variables_to_send_coeffs: usize,
@@ -126,8 +126,6 @@ pub struct WhirConfigBuilder<F, EF, H, C, const DIGEST_ELEMS: usize> {
     pub security_level: usize,
     /// The number of bits required for proof-of-work (PoW).
     pub pow_bits: usize,
-    pub base_field: PhantomData<F>,
-    pub extension_field: PhantomData<EF>,
     pub merkle_hash: H,
     pub merkle_compress: C,
 }
@@ -179,6 +177,28 @@ where
     pub _digest_elems: PhantomData<[F; DIGEST_ELEMS]>,
 }
 
+#[allow(clippy::too_many_lines)]
+pub fn second_batched_whir_config_builder<FB, EF, H, C, const DIGEST_ELEMS: usize>(
+    whir_parameters_a: WhirConfigBuilder<H, C, DIGEST_ELEMS>,
+    num_variables_a: usize,
+    num_variables_b: usize,
+) -> WhirConfigBuilder<H, C, DIGEST_ELEMS>
+where
+    FB: TwoAdicField,
+    EF: ExtensionField<FB> + TwoAdicField,
+    H: Clone,
+    C: Clone,
+{
+    let var_diff = num_variables_a.checked_sub(num_variables_b).unwrap();
+
+    assert!(num_variables_a >= num_variables_b, "TODO");
+    assert!(whir_parameters_a.folding_factor.first_round > var_diff);
+    let mut whir_parameters_b = whir_parameters_a;
+    whir_parameters_b.folding_factor.first_round -= var_diff;
+    whir_parameters_b.rs_domain_initial_reduction_factor = 0; // will not be used anyway
+    whir_parameters_b
+}
+
 impl<F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
@@ -186,7 +206,7 @@ where
 {
     #[allow(clippy::too_many_lines)]
     pub fn new(
-        whir_parameters: WhirConfigBuilder<F, EF, H, C, DIGEST_ELEMS>,
+        whir_parameters: WhirConfigBuilder<H, C, DIGEST_ELEMS>,
         num_variables: usize,
     ) -> Self {
         whir_parameters
