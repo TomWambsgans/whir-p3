@@ -98,6 +98,12 @@ where
     }
 }
 
+impl<F> From<Vec<F>> for MultilinearPoint<F> {
+    fn from(v: Vec<F>) -> Self {
+        Self(v)
+    }
+}
+
 impl<F> MultilinearPoint<F>
 where
     StandardUniform: Distribution<F>,
@@ -118,8 +124,11 @@ pub struct Evaluation<F> {
 }
 
 impl<F: Field> Evaluation<F> {
-    pub fn new(point: MultilinearPoint<F>, value: F) -> Self {
-        Self { point, value }
+    pub fn new(point: impl Into<MultilinearPoint<F>>, value: F) -> Self {
+        Self {
+            point: point.into(),
+            value,
+        }
     }
 
     pub fn num_variables(&self) -> usize {
