@@ -91,41 +91,6 @@ where
         acc
     }
 
-    /// Computes `eq3(c, p)`, the **equality polynomial** for `{0,1,2}^n`.
-    ///
-    /// `p` is interpreted as a **big-endian** ternary number.
-    ///
-    /// `eq3(c, p)` is the unique polynomial of **degree ≤ 2** in each variable,
-    /// such that:
-    /// ```ignore
-    /// eq3(c, p) = 1  if c == p
-    ///           = 0  otherwise
-    /// ```
-    /// Uses precomputed values to reduce redundant operations.
-    #[must_use]
-    pub fn eq_poly3(&self, mut point: usize) -> F {
-        let n_variables = self.num_variables();
-        assert!(point < 3usize.pow(n_variables as u32));
-
-        let mut acc = F::ONE;
-
-        // Iterate in **little-endian** order and adjust using big-endian convention.
-        for &val in self.iter().rev() {
-            let val_minus_one = val - F::ONE;
-            let val_minus_two = val - F::TWO;
-
-            acc *= match point % 3 {
-                0 => val_minus_one * val_minus_two.halve(), // (val - 1)(val - 2) / 2
-                1 => -val * val_minus_two,                  // val (val - 2)(-1)
-                2 => val * val_minus_one.halve(),           // val (val - 1) / 2
-                _ => unreachable!(),
-            };
-            point /= 3;
-        }
-
-        acc
-    }
-
     /// Embeds the point into an extension field `EF`.
     #[must_use]
     pub fn embed<EF: ExtensionField<F>>(&self) -> MultilinearPoint<EF> {

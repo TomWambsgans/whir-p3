@@ -1,10 +1,13 @@
-use std::{fmt::Debug, marker::PhantomData, ops::Deref};
+use std::{fmt::Debug, marker::PhantomData};
 
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_symmetric::Hash;
 
 use crate::{
-    fiat_shamir::{errors::ProofResult, verifier::VerifierState, FSChallenger}, poly::multilinear::{Evaluation, MultilinearPoint}, whir::config::WhirConfig, PF
+    PF,
+    fiat_shamir::{FSChallenger, errors::ProofResult, verifier::VerifierState},
+    poly::multilinear::{Evaluation, MultilinearPoint},
+    whir::config::{WhirConfig, WhirConfigBuilder},
 };
 
 /// Represents a parsed commitment from the prover in the WHIR protocol.
@@ -113,23 +116,23 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
     }
 }
 
-/// Helper for parsing commitment data during verification.
-///
-/// The `CommitmentReader` wraps the WHIR configuration and provides a convenient
-/// method to extract a `ParsedCommitment` by reading values from the Fiat-Shamir transcript.
-#[derive(Debug)]
-pub struct CommitmentReader<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
-    /// Reference to the verifier’s configuration object.
-    ///
-    /// This contains all parameters needed to parse the commitment,
-    /// including how many out-of-domain samples are expected.
-    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
-)
-where
-    F: Field,
-    EF: ExtensionField<F>;
+impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
+    pub fn parse_commitment<F, EF>(
+        &self,
+        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        num_variables: usize,
+    ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>>
+    where
+        F: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
+        H: Clone,
+        C: Clone,
+    {
+        WhirConfig::new(self.clone(), num_variables).parse_commitment(verifier_state)
+    }
+}
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> CommitmentReader<'a, F, EF, H, C, DIGEST_ELEMS>
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
@@ -147,18 +150,5 @@ where
             self.num_variables,
             self.committment_ood_samples,
         )
-    }
-}
-
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref
-    for CommitmentReader<'_, F, EF, H, C, DIGEST_ELEMS>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
     }
 }

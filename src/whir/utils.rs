@@ -32,7 +32,7 @@ pub const fn workload_size<T: Sized>() -> usize {
 ///
 /// ## Returns
 /// A sorted and deduplicated list of random query indices in the folded domain.
-pub fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
+pub(crate) fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
     folded_domain_size: usize,
     num_queries: usize,
     prover_state: &mut Chal,
@@ -45,7 +45,7 @@ pub fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
 /// A utility function to sample Out-of-Domain (OOD) points and evaluate them.
 ///
 /// This should be used on the prover side.
-pub fn sample_ood_points<F: Field, EF: ExtensionField<F>, E>(
+pub(crate) fn sample_ood_points<F: Field, EF: ExtensionField<F>, E>(
     prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
     num_samples: usize,
     num_variables: usize,

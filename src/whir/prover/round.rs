@@ -1,7 +1,6 @@
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
-use super::Prover;
 use crate::{
     PF,
     fiat_shamir::{FSChallenger, errors::ProofResult, prover::ProverState},
@@ -10,7 +9,10 @@ use crate::{
         multilinear::{Evaluation, MultilinearPoint},
     },
     sumcheck::SumcheckSingle,
-    whir::committer::{RoundMerkleTree, Witness},
+    whir::{
+        committer::{RoundMerkleTree, Witness},
+        config::WhirConfig,
+    },
 };
 
 /// Holds all per-round prover state required during the execution of the WHIR protocol.
@@ -70,7 +72,7 @@ where
     EF: ExtensionField<PF<EF>>,
 {
     pub(crate) fn initialize_first_round_state<MyChallenger, C>(
-        prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
+        prover: &WhirConfig<F, EF, MyChallenger, C, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         mut statement: Vec<Evaluation<EF>>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
@@ -123,7 +125,7 @@ where
     }
 
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
-        prover: &Prover<'_, F, EF, MyChallenger, C, DIGEST_ELEMS>,
+        prover: &WhirConfig<F, EF, MyChallenger, C, DIGEST_ELEMS>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,

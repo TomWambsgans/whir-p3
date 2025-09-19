@@ -4,7 +4,6 @@ use p3_field::Field;
 use crate::{PF, fiat_shamir::verifier::ChallengerState};
 
 pub mod errors;
-pub mod pattern;
 pub mod prover;
 pub mod verifier;
 

@@ -1,10 +1,9 @@
-use std::ops::Deref;
-
 use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
+use p3_util::log2_strict_usize;
 use round::RoundState;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
@@ -20,7 +19,7 @@ use crate::{
     },
     utils::{flatten_scalars_to_base, parallel_repeat},
     whir::{
-        config::{RoundConfig, WhirConfig},
+        config::{RoundConfig, WhirConfig, WhirConfigBuilder},
         utils::{get_challenge_stir_queries, sample_ood_points},
     },
 };
@@ -30,28 +29,73 @@ pub mod round;
 pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
 pub type Leafs<F> = Vec<Vec<F>>;
 
-#[derive(Debug)]
-pub struct Prover<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
-    /// Reference to the protocol configuration shared across prover components.
-    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
-)
-where
-    F: Field,
-    EF: ExtensionField<F>;
+impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
+    pub fn prove<F, EF>(
+        &self,
+        dft: &EvalsDft<PF<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        statement: Vec<Evaluation<EF>>,
+        witness: Witness<F, EF, DIGEST_ELEMS>,
+        polynomial: &[F],
+    ) -> ProofResult<MultilinearPoint<EF>>
+    where
+        F: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
+        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<EF>: TwoAdicField,
+    {
+        WhirConfig::new(self.clone(), log2_strict_usize(polynomial.len())).prove(
+            dft,
+            prover_state,
+            statement,
+            witness,
+            polynomial,
+        )
+    }
 
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for Prover<'_, F, EF, H, C, DIGEST_ELEMS>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
+    pub fn batch_prove<F, EF>(
+        &self,
+        dft: &EvalsDft<PF<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        statement_a: Vec<Evaluation<EF>>,
+        witness_a: Witness<F, EF, DIGEST_ELEMS>,
+        polynomial_a: &[F],
+        statement_b: Vec<Evaluation<EF>>,
+        witness_b: Witness<EF, EF, DIGEST_ELEMS>,
+        polynomial_b: &[EF],
+    ) -> MultilinearPoint<EF>
+    where
+        F: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
+        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<EF>: TwoAdicField,
+    {
+        WhirConfig::new(self.clone(), log2_strict_usize(polynomial_a.len())).batch_prove(
+            dft,
+            prover_state,
+            statement_a,
+            witness_a,
+            polynomial_a,
+            statement_b,
+            witness_b,
+            polynomial_b,
+        )
     }
 }
 
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Prover<'_, F, EF, H, C, DIGEST_ELEMS>
+impl<F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField,
@@ -110,7 +154,7 @@ where
     }
 
     #[instrument(name = "WHIR prove", skip_all)]
-    pub fn prove(
+    fn prove(
         &self,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
@@ -171,7 +215,7 @@ where
         statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF, EF, DIGEST_ELEMS>,
         polynomial_b: &[EF],
-    ) ->  MultilinearPoint<EF>
+    ) -> MultilinearPoint<EF>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
@@ -196,11 +240,13 @@ where
             statement_b,
             witness_b,
             polynomial_b,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
-            self.round(round, dft, prover_state, &mut round_state).unwrap();
+            self.round(round, dft, prover_state, &mut round_state)
+                .unwrap();
         }
 
         // Reverse the vector of verifier challenges (used as evaluation point)

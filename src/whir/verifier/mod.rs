@@ -1,5 +1,3 @@
-use std::{fmt::Debug, ops::Deref};
-
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
@@ -21,27 +19,70 @@ use crate::{
     },
     utils::pack_scalars_to_extension,
     whir::{
-        config::{RoundConfig, WhirConfig},
+        config::{RoundConfig, WhirConfig, WhirConfigBuilder},
         verifier::sumcheck::verify_sumcheck_rounds,
     },
 };
 
-pub mod sumcheck;
+mod sumcheck;
 
-/// Wrapper around the WHIR verifier configuration.
-///
-/// This type provides a lightweight, ergonomic interface to verification methods
-/// by wrapping a reference to the `WhirConfig`.
-#[derive(Debug)]
-pub struct Verifier<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
-    /// Reference to the verifier’s configuration containing all round parameters.
-    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
-)
-where
-    F: Field,
-    EF: ExtensionField<F>;
+impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
+    pub fn verify<F, EF>(
+        &self,
+        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        statement: Vec<Evaluation<EF>>,
+    ) -> ProofResult<MultilinearPoint<EF>>
+    where
+        F: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
+        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<EF>: TwoAdicField,
+    {
+        WhirConfig::new(self.clone(), parsed_commitment.num_variables).verify(
+            verifier_state,
+            parsed_commitment,
+            statement,
+        )
+    }
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> Verifier<'a, F, EF, H, C, DIGEST_ELEMS>
+    pub fn batch_verify<F, EF>(
+        &self,
+        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        statement_a: Vec<Evaluation<EF>>,
+        parsed_commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
+        statement_b: Vec<Evaluation<EF>>,
+    ) -> ProofResult<MultilinearPoint<EF>>
+    where
+        F: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
+        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<EF>: TwoAdicField,
+    {
+        WhirConfig::new(self.clone(), parsed_commitment_a.num_variables).batch_verify(
+            verifier_state,
+            parsed_commitment_a,
+            statement_a,
+            parsed_commitment_b,
+            statement_b,
+        )
+    }
+}
+
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
@@ -381,7 +422,7 @@ where
     ///
     /// # Returns
     /// A vector of randomness values used to weight each constraint.
-    pub fn combine_constraints(
+    pub(crate) fn combine_constraints(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         claimed_sum: &mut EF,
@@ -425,7 +466,7 @@ where
     /// # Errors
     /// Returns `ProofError::InvalidProof` if Merkle proof verification fails
     /// or the prover’s data does not match the commitment.
-    pub fn verify_stir_challenges(
+    fn verify_stir_challenges(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         params: &RoundConfig<F>,
@@ -504,7 +545,7 @@ where
         Ok(stir_constraints)
     }
 
-    pub fn verify_stir_challenges_batched(
+    fn verify_stir_challenges_batched(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         params: &RoundConfig<F>,
@@ -603,7 +644,7 @@ where
         Ok(stir_constraints)
     }
 
-    pub fn verify_merkle_proof(
+    fn verify_merkle_proof(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         root: &Hash<PF<EF>, PF<EF>, DIGEST_ELEMS>,
@@ -774,18 +815,6 @@ where
                 .sum::<EF>();
         }
         value
-    }
-}
-
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for Verifier<'_, F, EF, H, C, DIGEST_ELEMS>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
     }
 }
 

@@ -1,10 +1,9 @@
-use std::ops::Deref;
-
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
+use p3_util::log2_strict_usize;
 use serde::{Deserialize, Serialize};
 
 use super::Witness;
@@ -14,25 +13,40 @@ use crate::{
     fiat_shamir::{FSChallenger, prover::ProverState},
     poly::evals::EvaluationsList,
     utils::parallel_repeat,
-    whir::{config::WhirConfig, utils::sample_ood_points},
+    whir::{
+        config::{WhirConfig, WhirConfigBuilder},
+        utils::sample_ood_points,
+    },
 };
 
-/// Responsible for committing polynomials using a Merkle-based scheme.
-///
-/// The `Committer` processes a polynomial, expands and folds its evaluations,
-/// and constructs a Merkle tree from the resulting values.
-///
-/// It provides a commitment that can be used for proof generation and verification.
-#[derive(Debug)]
-pub struct Commiter<'a, F, EF, H, C, const DIGEST_ELEMS: usize>(
-    /// Reference to the WHIR protocol configuration.
-    pub &'a WhirConfig<F, EF, H, C, DIGEST_ELEMS>,
-)
-where
-    F: Field,
-    EF: ExtensionField<F>;
+impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
+    pub fn commit<F, EF>(
+        &self,
+        dft: &EvalsDft<PF<EF>>,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        polynomial: &[F],
+    ) -> Witness<F, EF, DIGEST_ELEMS>
+    where
+        F: TwoAdicField + ExtensionField<PF<EF>>,
+        EF: TwoAdicField + ExtensionField<F> + ExtensionField<PF<EF>>,
+        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
+            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
+            + Sync,
+        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
+            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
+            + Sync,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        PF<EF>: TwoAdicField,
+    {
+        WhirConfig::new(self.clone(), log2_strict_usize(polynomial.len())).commit(
+            dft,
+            prover_state,
+            polynomial,
+        )
+    }
+}
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> Commiter<'a, F, EF, H, C, DIGEST_ELEMS>
+impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<PF<EF>>,
@@ -95,17 +109,5 @@ where
             ood_points,
             ood_answers,
         }
-    }
-}
-
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> Deref for Commiter<'_, F, EF, H, C, DIGEST_ELEMS>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type Target = WhirConfig<F, EF, H, C, DIGEST_ELEMS>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
     }
 }

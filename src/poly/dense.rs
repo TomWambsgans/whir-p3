@@ -19,15 +19,8 @@ pub struct DensePolynomial<F: Field> {
 }
 
 impl<F: Field> DensePolynomial<F> {
-    /// Constructs a new polynomial from a list of coefficients.
     #[must_use]
-    pub fn from_coefficients_slice(coeffs: &[F]) -> Self {
-        Self::from_coefficients_vec(coeffs.to_vec())
-    }
-
-    /// Constructs a new polynomial from a list of coefficients.
-    #[must_use]
-    pub const fn from_coefficients_vec(coeffs: Vec<F>) -> Self {
+    pub const fn new(coeffs: Vec<F>) -> Self {
         Self { coeffs }
     }
 
@@ -61,7 +54,7 @@ impl<F: Field> DensePolynomial<F> {
     where
         StandardUniform: Distribution<F>,
     {
-        Self::from_coefficients_vec((0..=degree).map(|_| rng.random()).collect())
+        Self::new((0..=degree).map(|_| rng.random()).collect())
     }
 
     /// Constructs the unique interpolating polynomial `P(x)` such that:
@@ -109,7 +102,7 @@ impl<F: Field> DensePolynomial<F> {
 
         // The basis polynomial B(x) starts at 1.
         // After i steps, B(x) = (x - x_0)(x - x_1)...(x - x_{i-1})
-        let mut basis_poly = Self::from_coefficients_vec(vec![F::ONE]);
+        let mut basis_poly = Self::new(vec![F::ONE]);
 
         // Newton-style interpolation loop
         for (x_i, y_i) in values.iter().take(n) {
@@ -141,7 +134,7 @@ impl<F: Field> DensePolynomial<F> {
             }
 
             // Convert the coefficient vector into a polynomial
-            let term = Self::from_coefficients_vec(term_coeffs);
+            let term = Self::new(term_coeffs);
 
             // Add the term to the result: P(x) := P(x) + c_i · B(x)
             result_poly += &term;
@@ -149,7 +142,7 @@ impl<F: Field> DensePolynomial<F> {
             // Update B(x) := B(x) · (x - x_i)
 
             // Monomial: (x - x_i) = -x_i + x = [-x_i, 1]
-            let monomial = Self::from_coefficients_slice(&[-x_i_ext, F::ONE]);
+            let monomial = Self::new(vec![-x_i_ext, F::ONE]);
 
             // Multiply current basis polynomial by the monomial
             basis_poly = &basis_poly * &monomial;
@@ -186,7 +179,7 @@ impl<F: Field> Add for &DensePolynomial<F> {
         for (i, coeff) in small.coeffs.iter().enumerate() {
             sum[i] += *coeff;
         }
-        DensePolynomial::from_coefficients_vec(sum)
+        DensePolynomial::new(sum)
     }
 }
 
@@ -221,7 +214,7 @@ impl<F: Field> Mul for &DensePolynomial<F> {
                 prod[i + j] += self.coeffs[i] * other.coeffs[j];
             }
         }
-        DensePolynomial::from_coefficients_vec(prod)
+        DensePolynomial::new(prod)
     }
 }
 

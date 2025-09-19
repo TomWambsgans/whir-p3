@@ -14,7 +14,7 @@ use crate::{
 
 const PARALLEL_THRESHOLD: usize = 4096;
 
-pub fn compress_ext<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
+fn compress_ext<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
     assert_ne!(evals.num_variables(), 0);
 
     // Fold between base and extension field elements
@@ -26,7 +26,7 @@ pub fn compress_ext<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<
     }
 }
 
-pub fn compress<F: Field>(evals: &mut Vec<F>, r: F) {
+fn compress<F: Field>(evals: &mut Vec<F>, r: F) {
     assert_ne!(evals.num_variables(), 0);
 
     if evals.len() >= PARALLEL_THRESHOLD {
@@ -111,18 +111,6 @@ fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     *sum = sumcheck_poly.evaluate(r);
 
     r
-}
-
-pub fn univariate_selectors<F: Field>(n: usize) -> Vec<DensePolynomial<F>> {
-    (0..1 << n)
-        .into_par_iter()
-        .map(|i| {
-            let values = (0..1 << n)
-                .map(|j| (F::from_u64(j), if i == j { F::ONE } else { F::ZERO }))
-                .collect::<Vec<_>>();
-            DensePolynomial::lagrange_interpolation(&values).unwrap()
-        })
-        .collect()
 }
 
 pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(

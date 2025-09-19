@@ -130,6 +130,12 @@ pub struct WhirConfigBuilder<H, C, const DIGEST_ELEMS: usize> {
     pub merkle_compress: C,
 }
 
+impl<H, C, const DIGEST_ELEMS: usize> WhirConfigBuilder<H, C, DIGEST_ELEMS> {
+    pub const fn max_fft_size(&self, num_variables: usize) -> usize {
+        num_variables + self.starting_log_inv_rate - self.folding_factor.at_round(0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RoundConfig<F> {
     pub pow_bits: usize,
@@ -179,7 +185,7 @@ where
 
 #[allow(clippy::too_many_lines)]
 pub fn second_batched_whir_config_builder<FB, EF, H, C, const DIGEST_ELEMS: usize>(
-    whir_parameters_a: WhirConfigBuilder<H, C, DIGEST_ELEMS>,
+    params_a: WhirConfigBuilder<H, C, DIGEST_ELEMS>,
     num_variables_a: usize,
     num_variables_b: usize,
 ) -> WhirConfigBuilder<H, C, DIGEST_ELEMS>
@@ -192,11 +198,11 @@ where
     let var_diff = num_variables_a.checked_sub(num_variables_b).unwrap();
 
     assert!(num_variables_a >= num_variables_b, "TODO");
-    assert!(whir_parameters_a.folding_factor.first_round > var_diff);
-    let mut whir_parameters_b = whir_parameters_a;
-    whir_parameters_b.folding_factor.first_round -= var_diff;
-    whir_parameters_b.rs_domain_initial_reduction_factor = 0; // will not be used anyway
-    whir_parameters_b
+    assert!(params_a.folding_factor.first_round > var_diff);
+    let mut params_b = params_a;
+    params_b.folding_factor.first_round -= var_diff;
+    params_b.rs_domain_initial_reduction_factor = 0; // will not be used anyway
+    params_b
 }
 
 impl<F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
@@ -418,8 +424,6 @@ where
         self.num_variables - self.folding_factor.total_number(self.n_rounds())
     }
 
-    /// Returns the log2 size of the largest FFT
-    /// (At commitment we perform 2^folding_factor FFT of size 2^max_fft_size)
     pub const fn max_fft_size(&self) -> usize {
         self.num_variables + self.starting_log_inv_rate - self.folding_factor.at_round(0)
     }

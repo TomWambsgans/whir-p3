@@ -14,12 +14,7 @@ use whir_p3::{
         evals::EvaluationsList,
         multilinear::{Evaluation, MultilinearPoint},
     },
-    whir::{
-        committer::{reader::CommitmentReader, writer::Commiter},
-        config::*,
-        prover::Prover,
-        verifier::Verifier,
-    },
+    whir::config::*,
 };
 
 // Commit A in F, B in EF
@@ -66,7 +61,7 @@ fn main() {
     let num_coeffs_b = 1 << num_variables_b;
 
     // Construct WHIR protocol parameters
-    let whir_params = WhirConfigBuilder {
+    let params_a = WhirConfigBuilder {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
@@ -78,13 +73,9 @@ fn main() {
         rs_domain_initial_reduction_factor: 5,
     };
 
-    let params_a = WhirConfig::new(whir_params.clone(), num_variables_a);
-    let params_b = WhirConfig::new(
-        second_batched_whir_config_builder::<BaseFieldB, EF, _, _, _>(
-            whir_params,
-            num_variables_a,
-            num_variables_b,
-        ),
+    let params_b = second_batched_whir_config_builder::<BaseFieldB, EF, _, _, _>(
+        params_a.clone(),
+        num_variables_a,
         num_variables_b,
     );
 
@@ -146,19 +137,19 @@ fn main() {
 
     // Commit to the polynomial and produce a witness
 
-    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
+    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size(num_variables_a));
 
     let time = Instant::now();
-    let witness_a = Commiter(&params_a).commit(&dft, &mut prover_state, &polynomial_a);
+    let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
 
     let time = Instant::now();
-    let witness_b = Commiter(&params_b).commit(&dft, &mut prover_state, &polynomial_b);
+    let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
     let commit_time_b = time.elapsed();
 
     // Generate a proof for the given statement and witness
     let time = Instant::now();
-    Prover(&params_a).batch_prove(
+    params_a.batch_prove(
         &dft,
         &mut prover_state,
         statement_a.clone(),
@@ -175,15 +166,15 @@ fn main() {
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
-    let parsed_commitment_a = CommitmentReader(&params_a)
-        .parse_commitment(&mut verifier_state)
+    let parsed_commitment_a = params_a
+        .parse_commitment::<F, EF>(&mut verifier_state, num_variables_a)
         .unwrap();
-    let parsed_commitment_b = CommitmentReader(&params_b)
-        .parse_commitment(&mut verifier_state)
+    let parsed_commitment_b = params_b
+        .parse_commitment::<EF, EF>(&mut verifier_state, num_variables_b)
         .unwrap();
 
     let verif_time = Instant::now();
-    Verifier(&params_a)
+    params_a
         .batch_verify(
             &mut verifier_state,
             &parsed_commitment_a,

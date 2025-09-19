@@ -58,7 +58,7 @@ where
         // Extract the 3 evaluations of the quadratic sumcheck polynomial h(X)
         let coeffs: [_; 3] = verifier_state.next_extension_scalars_const()?;
 
-        let poly = DensePolynomial::from_coefficients_vec(coeffs.to_vec());
+        let poly = DensePolynomial::new(coeffs.to_vec());
 
         // Verify claimed sum is consistent with polynomial
         if poly.evaluate(EF::ZERO) + poly.evaluate(EF::ONE) != *claimed_sum {
