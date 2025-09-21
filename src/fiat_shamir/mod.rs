@@ -15,14 +15,11 @@ const LEAN_ISA_VECTOR_LEN: usize = 8;
 /// deterministically generate random challenges from a transcript using a cryptographic
 /// challenger. The challenges are used to drive non-interactive proofs or interactive
 /// proof reductions.
-pub trait BitsSampler<F> {
-    /// Sample a uniformly random integer consisting of a given number of bits.
-    ///
-    /// # Arguments
-    /// - `bits`: Number of bits in the output integer.
-    ///
-    /// # Returns
-    /// A `usize` value uniformly sampled from the range `0..2^bits`, derived from the transcript state.
+pub trait ChallengeSampler<F> {
+    fn sample(&mut self) -> F;
+
+    fn sample_vec(&mut self, len: usize) -> Vec<F>;
+
     fn sample_bits(&mut self, bits: usize) -> usize;
 }
 

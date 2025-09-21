@@ -2,7 +2,7 @@ use p3_field::{ExtensionField, Field};
 
 use crate::{
     PF,
-    fiat_shamir::{BitsSampler, FSChallenger, prover::ProverState},
+    fiat_shamir::{ChallengeSampler, FSChallenger, prover::ProverState},
     poly::multilinear::MultilinearPoint,
 };
 
@@ -32,7 +32,7 @@ pub const fn workload_size<T: Sized>() -> usize {
 ///
 /// ## Returns
 /// A sorted and deduplicated list of random query indices in the folded domain.
-pub(crate) fn get_challenge_stir_queries<F: Field, Chal: BitsSampler<F>>(
+pub(crate) fn get_challenge_stir_queries<F: Field, Chal: ChallengeSampler<F>>(
     folded_domain_size: usize,
     num_queries: usize,
     prover_state: &mut Chal,

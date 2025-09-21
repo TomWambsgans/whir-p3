@@ -4,7 +4,7 @@ use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{ExtensionField, Field};
 
 use crate::{
-    fiat_shamir::{BitsSampler, LEAN_ISA_VECTOR_LEN},
+    fiat_shamir::{ChallengeSampler, LEAN_ISA_VECTOR_LEN},
     utils::flatten_scalars_to_base,
 };
 
@@ -176,7 +176,7 @@ where
     }
 }
 
-impl<F, EF, Challenger> BitsSampler<F> for ProverState<F, EF, Challenger>
+impl<F, EF, Challenger> ChallengeSampler<EF> for ProverState<F, EF, Challenger>
 where
     EF: ExtensionField<F>,
     F: Field,
@@ -184,5 +184,13 @@ where
 {
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.sample_bits(bits)
+    }
+
+    fn sample(&mut self) -> EF {
+        self.sample()
+    }
+
+    fn sample_vec(&mut self, len: usize) -> Vec<EF> {
+        self.sample_vec(len)
     }
 }

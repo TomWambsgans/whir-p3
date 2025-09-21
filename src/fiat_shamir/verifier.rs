@@ -4,7 +4,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
 use crate::{
-    fiat_shamir::{BitsSampler, LEAN_ISA_VECTOR_LEN, errors::ProofError},
+    fiat_shamir::{errors::ProofError, ChallengeSampler, LEAN_ISA_VECTOR_LEN},
     utils::pack_scalars_to_extension,
 };
 
@@ -215,17 +215,6 @@ where
     }
 }
 
-impl<F, EF, Challenger> BitsSampler<F> for VerifierState<F, EF, Challenger>
-where
-    EF: ExtensionField<F>,
-    F: Field,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
-{
-    fn sample_bits(&mut self, bits: usize) -> usize {
-        self.sample_bits(bits)
-    }
-}
-
 pub trait ChallengerState {
     fn state(&self) -> String;
 }
@@ -239,5 +228,24 @@ impl ChallengerState for DuplexChallenger<KoalaBear, Poseidon2KoalaBear<16>, 16,
 impl ChallengerState for DuplexChallenger<BabyBear, Poseidon2BabyBear<16>, 16, 8> {
     fn state(&self) -> String {
         format!("{:?}", self.sponge_state)
+    }
+}
+
+impl<F, EF, Challenger> ChallengeSampler<EF> for VerifierState<F, EF, Challenger>
+where
+    EF: ExtensionField<F>,
+    F: Field,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+{
+    fn sample_bits(&mut self, bits: usize) -> usize {
+        self.sample_bits(bits)
+    }
+
+    fn sample(&mut self) -> EF {
+        self.sample()
+    }
+
+    fn sample_vec(&mut self, len: usize) -> Vec<EF> {
+        self.sample_vec(len)
     }
 }
