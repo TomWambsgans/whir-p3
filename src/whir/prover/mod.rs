@@ -92,6 +92,7 @@ where
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement: Vec<Evaluation<EF>>,
+        dot_product_statement: Option<(Vec<EF>, EF)>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &[F],
     ) -> MultilinearPoint<EF>
@@ -120,6 +121,7 @@ where
             statement,
             witness,
             polynomial,
+            dot_product_statement,
         )
         .unwrap();
 
@@ -145,6 +147,7 @@ where
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
+        dot_product_statement_a: Option<(Vec<EF>, EF)>,
         witness_a: Witness<F, EF, DIGEST_ELEMS>,
         polynomial_a: &[F],
         statement_b: Vec<Evaluation<EF>>,
@@ -175,6 +178,7 @@ where
             statement_b,
             witness_b,
             polynomial_b,
+            dot_product_statement_a,
         )
         .unwrap();
 
@@ -434,7 +438,9 @@ where
         let combination_randomness_gen: EF = prover_state.sample();
         let ood_combination_randomness: Vec<_> = combination_randomness_gen
             .powers()
-            .collect_n(ood_challenges.len());
+            .skip(1)
+            .take(ood_challenges.len())
+            .collect::<Vec<_>>();
         round_state.sumcheck_prover.add_new_equality(
             &ood_challenges,
             &ood_answers,
@@ -442,7 +448,7 @@ where
         );
         let stir_combination_randomness = combination_randomness_gen
             .powers()
-            .skip(ood_challenges.len())
+            .skip(ood_challenges.len() + 1)
             .take(stir_challenges.len())
             .collect::<Vec<_>>();
 

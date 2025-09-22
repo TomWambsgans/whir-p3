@@ -57,6 +57,7 @@ fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
 ) -> (EF, Vec<EF>) {
     // Compute the quadratic sumcheck polynomial for the current variable.
     let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
+
     prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
     // TODO: re-enable PoW grinding
@@ -178,6 +179,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         pow_bits: usize,
+        dot_product_statement: Option<(Vec<EF>, EF)>,
     ) -> (Self, MultilinearPoint<EF>)
     where
         EF: ExtensionField<F>,
@@ -185,8 +187,11 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
 
-        let (mut weights, mut sum) =
-            combine_statement::<PF<EF>, EF>(statement, combination_randomness);
+        let (mut weights, mut sum) = combine_statement::<PF<EF>, EF>(
+            statement,
+            combination_randomness,
+            dot_product_statement,
+        );
         // In the first round base field evaluations are folded into extension field elements
         let (r, mut evals) = initial_round(prover_state, evals, &mut weights, &mut sum, pow_bits);
         res.push(r);
@@ -291,7 +296,11 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
     }
 }
 
-fn combine_statement<Base, EF>(statement: &[Evaluation<EF>], challenge: EF) -> (Vec<EF>, EF)
+fn combine_statement<Base, EF>(
+    statement: &[Evaluation<EF>],
+    challenge: EF,
+    dot_product_statement: Option<(Vec<EF>, EF)>,
+) -> (Vec<EF>, EF)
 where
     Base: Field,
     EF: ExtensionField<Base>,
@@ -299,9 +308,14 @@ where
     let num_variables = statement[0].num_variables();
     assert!(statement.iter().all(|e| e.num_variables() == num_variables));
 
-    let mut combined_evals = EF::zero_vec(1 << num_variables);
+    let (mut combined_evals, sum_start) = if let Some((vec, val)) = dot_product_statement {
+        assert_eq!(vec.len(), 1 << num_variables);
+        (vec, val)
+    } else {
+        (EF::zero_vec(1 << num_variables), EF::ZERO)
+    };
     let (combined_sum, _) = statement.iter().fold(
-        (EF::ZERO, EF::ONE),
+        (sum_start, challenge),
         |(mut acc_sum, gamma_pow), constraint| {
             compute_sparse_eval_eq::<Base, EF>(&constraint.point, &mut combined_evals, gamma_pow);
             acc_sum += constraint.value * gamma_pow;

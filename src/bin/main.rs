@@ -5,6 +5,7 @@ use p3_field::{PrimeCharacteristicRing, PrimeField64};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use rayon::prelude::*;
 use tracing_forest::{ForestLayer, util::LevelFilter};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::{
@@ -65,7 +66,7 @@ fn main() {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::new(7, 4),
+        folding_factor: FoldingFactor::new(6, 4),
         merkle_hash: merkle_hash.clone(),
         merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
@@ -90,6 +91,13 @@ fn main() {
     let polynomial_b = (0..num_coeffs_b)
         .map(|_| rng.random())
         .collect::<Vec<BaseFieldB>>();
+
+    let dot_product_slice = (0..num_coeffs_a).map(|_| rng.random()).collect::<Vec<EF>>();
+    let dot_product_value = dot_product_slice
+        .par_iter()
+        .zip(polynomial_a.par_iter())
+        .map(|(a, b)| *a * *b)
+        .sum::<EF>();
 
     let random_sparse_point = |rng: &mut StdRng, num_variables: usize| {
         let mut point = (0..num_variables)
@@ -155,6 +163,7 @@ fn main() {
         &dft,
         &mut prover_state,
         statement_a.clone(),
+        Some((dot_product_slice.clone(), dot_product_value)),
         witness_a,
         &polynomial_a,
         statement_b.clone(),
@@ -168,24 +177,25 @@ fn main() {
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
-    let parsed_commitment_a = params_a
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
-    let parsed_commitment_b = params_b
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
+    let parsed_commitment_a = params_a.parse_commitment(&mut verifier_state).unwrap();
+    let parsed_commitment_b = params_b.parse_commitment(&mut verifier_state).unwrap();
 
     let verif_time = Instant::now();
-    params_a
+    let eval = params_a
         .batch_verify(
             &mut verifier_state,
             &parsed_commitment_a,
             statement_a,
             &parsed_commitment_b,
             statement_b,
+            Some(dot_product_value),
         )
         .unwrap();
     let verify_time = verif_time.elapsed();
+
+        dbg!(1);
+
+    assert_eq!(dot_product_slice.evaluate(&eval.point), eval.value);
 
     println!(
         "\nProving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",

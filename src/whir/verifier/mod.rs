@@ -40,7 +40,8 @@ where
         statement_a: Vec<Evaluation<EF>>,
         parsed_commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
         statement_b: Vec<Evaluation<EF>>,
-    ) -> ProofResult<MultilinearPoint<EF>>
+        dot_product_claim: Option<EF>,
+    ) -> ProofResult<Evaluation<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -65,7 +66,7 @@ where
         // and we update the claimed sum of constraint evaluation.
         let mut round_constraints = Vec::new();
         let mut round_folding_randomness = Vec::new();
-        let mut claimed_sum = EF::ZERO;
+        let mut claimed_sum = dot_product_claim.unwrap_or(EF::ZERO);
         let mut prev_commitment = None;
 
         // Combine OODS and statement constraints to claimed_sum
@@ -202,11 +203,12 @@ where
 
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
-        if claimed_sum != evaluation_of_weights * final_value {
-            return Err(ProofError::InvalidProof);
-        }
 
-        Ok(folding_randomness)
+        let dot_product_value = claimed_sum / final_value - evaluation_of_weights;
+        Ok(Evaluation::new(
+            MultilinearPoint(folding_randomness[..folding_randomness.len() - 1].to_vec()),
+            dot_product_value / folding_randomness[folding_randomness.len() - 1],
+        ))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -215,7 +217,8 @@ where
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
         statement: Vec<Evaluation<EF>>,
-    ) -> ProofResult<MultilinearPoint<EF>>
+        dot_product_claim: Option<EF>,
+    ) -> ProofResult<Evaluation<EF>>
     where
         H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
             + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
@@ -235,7 +238,7 @@ where
         // and we update the claimed sum of constraint evaluation.
         let mut round_constraints = Vec::new();
         let mut round_folding_randomness = Vec::new();
-        let mut claimed_sum = EF::ZERO;
+        let mut claimed_sum = dot_product_claim.unwrap_or(EF::ZERO);
         let mut prev_commitment = parsed_commitment.clone();
 
         // Combine OODS and statement constraints to claimed_sum
@@ -343,11 +346,8 @@ where
 
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
-        if claimed_sum != evaluation_of_weights * final_value {
-            return Err(ProofError::InvalidProof);
-        }
-
-        Ok(folding_randomness)
+        let dot_product_value = claimed_sum / final_value - evaluation_of_weights;
+        Ok(Evaluation::new(folding_randomness, dot_product_value))
     }
 
     /// Combine multiple constraints into a single claim using random linear combination.
@@ -375,6 +375,7 @@ where
         let combination_randomness_gen: EF = verifier_state.sample();
         let combination_randomness: Vec<_> = combination_randomness_gen
             .powers()
+            .skip(1)
             .take(constraints.len())
             .collect();
         *claimed_sum += constraints

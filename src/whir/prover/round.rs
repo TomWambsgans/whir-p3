@@ -1,5 +1,5 @@
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::prelude::*;
 
 use crate::{
     PF,
@@ -77,6 +77,7 @@ where
         mut statement: Vec<Evaluation<EF>>,
         witness: Witness<F, EF, DIGEST_ELEMS>,
         polynomial: &[F],
+        dot_product_statement: Option<(Vec<EF>, EF)>,
     ) -> ProofResult<Self> {
         // Convert witness ood_points into constraints
         let new_constraints = witness
@@ -100,6 +101,7 @@ where
             prover_state,
             prover.folding_factor.at_round(0),
             prover.starting_folding_pow_bits,
+            dot_product_statement,
         );
 
         let randomness_vec = {
@@ -133,6 +135,7 @@ where
         statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF, EF, DIGEST_ELEMS>,
         polynomial_b: &[EF],
+        dot_product_statement_a: Option<(Vec<EF>, EF)>,
     ) -> ProofResult<Self> {
         let n_vars_a = statement_a[0].num_variables();
         let n_vars_b = statement_b[0].num_variables();
@@ -178,6 +181,18 @@ where
                 *eval = EF::from(polynomial_a[i]); // TODO embedding overhead
             });
 
+        let dot_product_statement = dot_product_statement_a.map(|(slice, sum)| {
+            let mut new_vec = EF::zero_vec(polynomial_a.num_evals() * 2);
+            new_vec[1..]
+                .par_iter_mut()
+                .step_by(2)
+                .zip(slice.par_iter())
+                .for_each(|(a, b)| {
+                    *a = *b;
+                });
+            (new_vec, sum)
+        });
+
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
             &polynomial,
             &statement,
@@ -185,6 +200,7 @@ where
             prover_state,
             prover.folding_factor.at_round(0) + 1,
             prover.starting_folding_pow_bits,
+            dot_product_statement,
         );
 
         let randomness_vec = {
