@@ -1,4 +1,5 @@
 use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_util::log2_strict_usize;
 use rayon::prelude::*;
 
 use crate::{
@@ -137,8 +138,8 @@ where
         polynomial_b: &[EF],
         dot_product_statement_a: Option<(Vec<EF>, EF)>,
     ) -> ProofResult<Self> {
-        let n_vars_a = statement_a[0].num_variables();
-        let n_vars_b = statement_b[0].num_variables();
+        let n_vars_a = log2_strict_usize(polynomial_a.len());
+        let n_vars_b = log2_strict_usize(polynomial_b.len());
 
         let mut statement = Vec::new();
 
@@ -231,16 +232,11 @@ fn add_constraints_in_front<EF: Field>(
     constraints: Vec<(MultilinearPoint<EF>, EF)>,
 ) {
     // Store the number of variables expected by this statement.
-    let n = statements[0].num_variables();
-
     // Preallocate a vector for the converted constraints to avoid reallocations.
     let mut new_constraints = Vec::with_capacity(constraints.len());
 
     // Iterate through each (weights, sum) pair in the input.
     for (weights, sum) in constraints {
-        // Ensure the number of variables in the weight matches the statement.
-        assert_eq!(weights.num_variables(), n);
-
         // Convert the pair into a full `Constraint` with `defer_evaluation = false`.
         new_constraints.push(Evaluation {
             point: weights,
