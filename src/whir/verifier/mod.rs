@@ -93,8 +93,12 @@ where
                 }),
         );
 
-        let combination_randomness =
-            self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+        let combination_randomness = self.combine_constraints(
+            verifier_state,
+            &mut claimed_sum,
+            &constraints,
+            dot_product_claim.is_some(),
+        )?;
         round_constraints.push((combination_randomness, constraints));
 
         // Initial sumcheck
@@ -145,7 +149,7 @@ where
                 .collect();
 
             let combination_randomness =
-                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints, false)?;
             round_constraints.push((combination_randomness.clone(), constraints));
 
             let folding_randomness = verify_sumcheck_rounds::<F, EF>(
@@ -205,6 +209,11 @@ where
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
 
         let dot_product_value = claimed_sum / final_value - evaluation_of_weights;
+
+        if dot_product_claim.is_none() && dot_product_value != EF::ZERO {
+            return Err(ProofError::InvalidProof);
+        }
+
         Ok(Evaluation::new(
             MultilinearPoint(folding_randomness[..folding_randomness.len() - 1].to_vec()),
             dot_product_value / folding_randomness[folding_randomness.len() - 1],
@@ -247,8 +256,12 @@ where
             .into_iter()
             .chain(statement)
             .collect();
-        let combination_randomness =
-            self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+        let combination_randomness = self.combine_constraints(
+            verifier_state,
+            &mut claimed_sum,
+            &constraints,
+            dot_product_claim.is_some(),
+        )?;
         round_constraints.push((combination_randomness, constraints));
 
         // Initial sumcheck
@@ -288,7 +301,7 @@ where
                 .collect();
 
             let combination_randomness =
-                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
+                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints, false)?;
             round_constraints.push((combination_randomness.clone(), constraints));
 
             let folding_randomness = verify_sumcheck_rounds::<F, EF>(
@@ -347,6 +360,11 @@ where
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
         let dot_product_value = claimed_sum / final_value - evaluation_of_weights;
+
+        if dot_product_claim.is_none() && dot_product_value != EF::ZERO {
+            return Err(ProofError::InvalidProof);
+        }
+
         Ok(Evaluation::new(folding_randomness, dot_product_value))
     }
 
@@ -371,11 +389,12 @@ where
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         claimed_sum: &mut EF,
         constraints: &[Evaluation<EF>],
+        with_dot_product: bool,
     ) -> ProofResult<Vec<EF>> {
         let combination_randomness_gen: EF = verifier_state.sample();
         let combination_randomness: Vec<_> = combination_randomness_gen
             .powers()
-            .skip(1)
+            .skip(if with_dot_product { 1 } else { 0 })
             .take(constraints.len())
             .collect();
         *claimed_sum += constraints

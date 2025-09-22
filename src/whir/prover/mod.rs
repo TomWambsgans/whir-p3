@@ -438,9 +438,7 @@ where
         let combination_randomness_gen: EF = prover_state.sample();
         let ood_combination_randomness: Vec<_> = combination_randomness_gen
             .powers()
-            .skip(1)
-            .take(ood_challenges.len())
-            .collect::<Vec<_>>();
+            .collect_n(ood_challenges.len());
         round_state.sumcheck_prover.add_new_equality(
             &ood_challenges,
             &ood_answers,
@@ -448,7 +446,7 @@ where
         );
         let stir_combination_randomness = combination_randomness_gen
             .powers()
-            .skip(ood_challenges.len() + 1)
+            .skip(ood_challenges.len())
             .take(stir_challenges.len())
             .collect::<Vec<_>>();
 

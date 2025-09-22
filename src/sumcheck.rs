@@ -308,14 +308,15 @@ where
     let num_variables = statement[0].num_variables();
     assert!(statement.iter().all(|e| e.num_variables() == num_variables));
 
-    let (mut combined_evals, sum_start) = if let Some((vec, val)) = dot_product_statement {
-        assert_eq!(vec.len(), 1 << num_variables);
-        (vec, val)
-    } else {
-        (EF::zero_vec(1 << num_variables), EF::ZERO)
-    };
+    let (mut combined_evals, sum_start, starting_power) =
+        if let Some((vec, val)) = dot_product_statement {
+            assert_eq!(vec.len(), 1 << num_variables);
+            (vec, val, challenge)
+        } else {
+            (EF::zero_vec(1 << num_variables), EF::ZERO, EF::ONE)
+        };
     let (combined_sum, _) = statement.iter().fold(
-        (sum_start, challenge),
+        (sum_start, starting_power),
         |(mut acc_sum, gamma_pow), constraint| {
             compute_sparse_eval_eq::<Base, EF>(&constraint.point, &mut combined_evals, gamma_pow);
             acc_sum += constraint.value * gamma_pow;
