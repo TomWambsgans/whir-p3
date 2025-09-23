@@ -4,43 +4,16 @@ use tracing::instrument;
 
 use crate::*;
 
-const PARALLEL_THRESHOLD: usize = 4096;
-
-fn compress_ext<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
-    assert_ne!(evals.num_variables(), 0);
-
-    // Fold between base and extension field elements
+fn compress<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
     let fold = |slice: &[F]| -> EF { r * (slice[1] - slice[0]) + slice[0] };
-    if evals.len() >= PARALLEL_THRESHOLD {
-        evals.par_chunks_exact(2).map(fold).collect()
-    } else {
-        evals.chunks_exact(2).map(fold).collect()
-    }
+    evals[..evals.len() / 2]
+        .par_iter()
+        .zip(&evals[evals.len() / 2..])
+        .map(|(&a, &b)| fold(&[a, b]))
+        .collect()
 }
 
-fn compress<F: Field>(evals: &mut Vec<F>, r: F) {
-    assert_ne!(evals.num_variables(), 0);
-
-    if evals.len() >= PARALLEL_THRESHOLD {
-        // Define the folding operation for a pair of elements.
-        let fold = |slice: &[F]| -> F { r * (slice[1] - slice[0]) + slice[0] };
-        // Execute the fold in parallel and collect into a new vector.
-        let folded = evals.par_chunks_exact(2).map(fold).collect();
-        // Replace the old evaluations with the new, folded evaluations.
-        *evals = folded;
-    } else {
-        // For smaller inputs, we use the sequential, in-place strategy to save memory.
-        let mid = evals.len() / 2;
-        for i in 0..mid {
-            let p0 = evals[2 * i];
-            let p1 = evals[2 * i + 1];
-            evals[i] = r * (p1 - p0) + p0;
-        }
-        evals.truncate(mid);
-    }
-}
-
-fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
+fn run_sumcheck_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
     evals: &[F],
     weights: &mut Vec<EF>,
@@ -57,52 +30,12 @@ fn initial_round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     // Sample verifier challenge.
     let r: EF = prover_state.sample();
 
-    // Compress polynomials and update the sum.
-    let evals = { rayon::join(|| compress(weights, r), || compress_ext(evals, r)).1 };
+    *weights = compress(weights, r);
+    let compressed_evals = compress(evals, r);
 
     *sum = sumcheck_poly.evaluate(r);
 
-    (r, evals)
-}
-
-/// Executes a standard, intermediate round of the sumcheck protocol.
-///
-/// This function executes a standard, intermediate round of the sumcheck protocol. Unlike the initial round,
-/// it operates entirely within the extension field `EF`. It computes the sumcheck polynomial from the
-/// current evaluations and weights, adds it to the transcript, gets a new challenge from the verifier,
-/// and then compresses both the polynomial and weight evaluations in-place.
-///
-/// ## Arguments
-/// * `prover_state` - A mutable reference to the `ProverState`, managing the Fiat-Shamir transcript.
-/// * `evals` - A mutable reference to the polynomial's evaluations in `EF`, which will be compressed.
-/// * `weights` - A mutable reference to the weight evaluations in `EF`, which will also be compressed.
-/// * `sum` - A mutable reference to the claimed sum, updated after folding.
-/// * `pow_bits` - The number of proof-of-work bits for grinding.
-///
-/// ## Returns
-/// The verifier's challenge `r` as an `EF` element.
-fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
-    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-    evals: &mut Vec<EF>,
-    weights: &mut Vec<EF>,
-    sum: &mut EF,
-    _pow_bits: usize,
-) -> EF {
-    // Compute the quadratic sumcheck polynomial for the current variable.
-    let sumcheck_poly = compute_sumcheck_polynomial(evals, weights, *sum);
-    prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
-
-    // TODO: re-enable PoW grinding
-    // prover_state.pow_grinding(pow_bits);
-
-    // Sample verifier challenge.
-    let r: EF = prover_state.sample();
-    // Compress polynomials and update the sum.
-    rayon::join(|| compress(evals, r), || compress(weights, r));
-
-    *sum = sumcheck_poly.evaluate(r);
-
-    r
+    (r, compressed_evals)
 }
 
 #[instrument(skip_all, fields(num_variables = evals.num_variables()))]
@@ -111,12 +44,18 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     weights: &Vec<EF>,
     sum: EF,
 ) -> DensePolynomial<EF> {
-    assert!(evals.num_variables() >= 1);
+    assert!(evals.len().is_power_of_two());
 
-    let (c0, c2) = evals
-        .par_chunks_exact(2)
-        .zip(weights.par_chunks_exact(2))
-        .map(sumcheck_quadratic::<F, EF>)
+    let (c0, c2) = (0..evals.len() / 2)
+        .into_par_iter()
+        .map(|i| {
+            sumcheck_quadratic::<F, EF>(
+                evals[i],
+                evals[i + evals.len() / 2],
+                weights[i],
+                weights[i + evals.len() / 2],
+            )
+        })
         .reduce(
             || (EF::ZERO, EF::ZERO),
             |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
@@ -137,18 +76,18 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
 }
 
 #[inline]
-pub(crate) fn sumcheck_quadratic<F, EF>((p, eq): (&[F], &[EF])) -> (EF, EF)
+pub(crate) fn sumcheck_quadratic<F, EF>(p_0: F, p_1: F, eq_0: EF, eq_1: EF) -> (EF, EF)
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     // Compute the constant coefficient:
     // p(0) * w(0)
-    let constant = eq[0] * p[0];
+    let constant = eq_0 * p_0;
 
     // Compute the quadratic coefficient:
     // (p(1) - p(0)) * (w(1) - w(0))
-    let quadratic = (eq[1] - eq[0]) * (p[1] - p[0]);
+    let quadratic = (eq_1 - eq_0) * (p_1 - p_0);
 
     (constant, quadratic)
 }
@@ -164,7 +103,7 @@ pub(crate) struct SumcheckSingle<EF> {
 }
 
 impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
-    pub(crate) fn from_base_evals<F: Field>(
+    pub(crate) fn run_initial_sumcheck_rounds<F: Field>(
         evals: &[F],
         statement: &[Evaluation<EF>],
         combination_randomness: EF,
@@ -181,17 +120,17 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
         let (mut weights, mut sum) =
             combine_statement::<PF<EF>, EF>(statement, combination_randomness);
         // In the first round base field evaluations are folded into extension field elements
-        let (r, mut evals) = initial_round(prover_state, evals, &mut weights, &mut sum, pow_bits);
+        let (r, mut evals) =
+            run_sumcheck_round(prover_state, evals, &mut weights, &mut sum, pow_bits);
         res.push(r);
 
         // Apply rest of sumcheck rounds
-        res.extend(
-            (1..folding_factor).map(|_| {
-                round::<F, EF>(prover_state, &mut evals, &mut weights, &mut sum, pow_bits)
-            }),
-        );
-
-        res.reverse();
+        res.extend((1..folding_factor).map(|_| {
+            let (r, folded) =
+                run_sumcheck_round(prover_state, &evals, &mut weights, &mut sum, pow_bits);
+            evals = folded;
+            r
+        }));
 
         let sumcheck = Self {
             evals,
@@ -219,7 +158,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
             .iter()
             .zip(combination_randomness.iter())
             .for_each(|(point, &rand)| {
-                crate::utils::compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
+                compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
             });
 
         self.sum += combination_randomness
@@ -246,7 +185,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
             .iter()
             .zip(combination_randomness.iter())
             .for_each(|(point, &rand)| {
-                crate::utils::compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
+                compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
             });
 
         // Accumulate the weighted sum (cheap, done sequentially)
@@ -257,7 +196,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
             .sum::<EF>();
     }
 
-    pub(crate) fn compute_sumcheck_polynomials<F: Field>(
+    pub(crate) fn run_sumcheck_many_rounds<F: Field>(
         &mut self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
@@ -266,21 +205,21 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
     where
         EF: ExtensionField<F>,
     {
-        let mut res = (0..folding_factor)
-            .map(|_| {
-                round::<F, EF>(
-                    prover_state,
-                    &mut self.evals,
-                    &mut self.weights,
-                    &mut self.sum,
-                    pow_bits,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        res.reverse();
-
-        MultilinearPoint(res)
+        MultilinearPoint(
+            (0..folding_factor)
+                .map(|_| {
+                    let (r, folded) = run_sumcheck_round(
+                        prover_state,
+                        &mut self.evals,
+                        &mut self.weights,
+                        &mut self.sum,
+                        pow_bits,
+                    );
+                    self.evals = folded;
+                    r
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }
 

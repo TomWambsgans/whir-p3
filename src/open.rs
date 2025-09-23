@@ -117,7 +117,6 @@ where
         //
         // These challenges were pushed in round order; we reverse them to use as a single
         // evaluation point for final statement consistency checks.
-        round_state.randomness_vec.reverse();
         let constraint_eval = MultilinearPoint(round_state.randomness_vec);
 
         constraint_eval
@@ -172,7 +171,6 @@ where
         //
         // These challenges were pushed in round order; we reverse them to use as a single
         // evaluation point for final statement consistency checks.
-        round_state.randomness_vec.reverse();
         let constraint_eval = MultilinearPoint(round_state.randomness_vec);
 
         constraint_eval
@@ -438,7 +436,7 @@ where
 
         let folding_randomness = round_state
             .sumcheck_prover
-            .compute_sumcheck_polynomials::<PF<EF>>(
+            .run_sumcheck_many_rounds::<PF<EF>>(
                 prover_state,
                 folding_factor_next,
                 round_params.folding_pow_bits,
@@ -450,7 +448,7 @@ where
 
         for (dst, src) in dst_randomness
             .iter_mut()
-            .zip(folding_randomness.iter().rev())
+            .zip(folding_randomness.iter())
         {
             *dst = *src;
         }
@@ -483,19 +481,7 @@ where
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(&round_state.sumcheck_prover.evals);
 
-        // CRITICAL: Perform proof-of-work grinding to finalize the transcript before querying.
-        //
-        // This is a crucial security step to prevent a malicious prover from influencing the
-        // verifier's challenges.
-        //
-        // The verifier's query locations (the `stir_challenges`) are generated based on the
-        // current transcript state, which includes the prover's polynomial commitment (the Merkle
-        // root) for this round. Without grinding, a prover could repeatedly try different
-        // commitments until they find one that results in "easy" queries, breaking soundness.
-        //
-        // By forcing the prover to perform this expensive proof-of-work *after* committing but
-        // *before* receiving the queries, we make it computationally infeasible to "shop" for
-        // favorable challenges. The grinding effectively "locks in" the prover's commitment.
+       
         prover_state.pow_grinding(self.final_pow_bits);
 
         // Final verifier queries and answers. The indices are over the folded domain.
@@ -565,7 +551,7 @@ where
         if self.final_sumcheck_rounds > 0 {
             let final_folding_randomness = round_state
                 .sumcheck_prover
-                .compute_sumcheck_polynomials::<PF<EF>>(
+                .run_sumcheck_many_rounds::<PF<EF>>(
                     prover_state,
                     self.final_sumcheck_rounds,
                     self.final_folding_pow_bits,
@@ -576,7 +562,7 @@ where
 
             for (dst, src) in rand_dst
                 .iter_mut()
-                .zip(final_folding_randomness.iter().rev())
+                .zip(final_folding_randomness.iter())
             {
                 *dst = *src;
             }
@@ -703,7 +689,7 @@ where
 
         let combination_randomness_gen: EF = prover_state.sample();
 
-        let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
+        let (sumcheck_prover, folding_randomness) = SumcheckSingle::run_initial_sumcheck_rounds(
             polynomial,
             &statement,
             combination_randomness_gen,
@@ -713,8 +699,7 @@ where
         );
 
         let randomness_vec = {
-            let mut randomness_vec = Vec::with_capacity(prover.num_variables);
-            randomness_vec.extend(folding_randomness.iter().rev().copied());
+            let mut randomness_vec = folding_randomness.0.clone();
             randomness_vec.resize(prover.num_variables, EF::ZERO);
             randomness_vec
         };
@@ -788,7 +773,7 @@ where
                 *eval = EF::from(polynomial_a[i]); // TODO embedding overhead
             });
 
-        let (sumcheck_prover, folding_randomness) = SumcheckSingle::from_base_evals(
+        let (sumcheck_prover, folding_randomness) = SumcheckSingle::run_initial_sumcheck_rounds(
             &polynomial,
             &statement,
             combination_randomness_gen,
@@ -798,8 +783,7 @@ where
         );
 
         let randomness_vec = {
-            let mut randomness_vec = Vec::with_capacity(prover.num_variables);
-            randomness_vec.extend(folding_randomness.iter().rev().copied());
+            let mut randomness_vec = folding_randomness.0.clone();
             randomness_vec.resize(prover.num_variables, EF::ZERO);
             randomness_vec
         };

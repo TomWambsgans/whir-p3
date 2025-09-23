@@ -246,7 +246,6 @@ where
         let folding_randomness = MultilinearPoint(
             round_folding_randomness
                 .into_iter()
-                .rev()
                 .flat_map(|poly| poly.0.into_iter())
                 .collect(),
         );
@@ -387,7 +386,6 @@ where
         let folding_randomness = MultilinearPoint(
             round_folding_randomness
                 .into_iter()
-                .rev()
                 .flat_map(|poly| poly.0.into_iter())
                 .collect(),
         );
@@ -798,10 +796,6 @@ where
         // Store this round’s randomness
         randomness.push(rand);
     }
-
-    // We should reverse the order of the randomness points:
-    // This is because the randomness points are originally reverted at the end of the sumcheck rounds.
-    randomness.reverse();
 
     Ok(MultilinearPoint(randomness))
 }
