@@ -3,6 +3,7 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
+use p3_util::log2_ceil_usize;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
@@ -268,17 +269,6 @@ where
                     let mut answers_a = Vec::<Vec<F>>::new();
                     let mut answers_b = Vec::<Vec<EF>>::new();
 
-                    // for (answers, commitment_merkle_prover_data) in [
-                    //     (&mut answers_a, &round_state.commitment_merkle_prover_data_a),
-                    //     (
-                    //         &mut answers_b,
-                    //         round_state
-                    //             .commitment_merkle_prover_data_b
-                    //             .as_ref()
-                    //             .unwrap(),
-                    //     ),
-                    // ] {
-
                     {
                         let mut merkle_proofs = Vec::new();
                         for challenge in &stir_challenges_indexes {
@@ -357,6 +347,24 @@ where
                             .open_batch(*challenge, &round_state.commitment_merkle_prover_data_a);
                         answers.push(commitment.opened_values[0].clone());
                         merkle_proofs.push(commitment.opening_proof);
+
+                        dbg!(1);
+
+                        let mut folded_rev = round_state.folding_randomness.clone();
+                        folded_rev.reverse();
+                        let folded_eval =
+                            commitment.opened_values[0].evaluate(&folded_rev);
+                        assert_eq!(
+                            folded_eval,
+                            round_state.sumcheck_prover.evals.evaluate(
+                                &MultilinearPoint::expand_from_univariate(
+                                    EF::from(
+                                        round_state.next_domain_gen.exp_u64(*challenge as u64)
+                                    ),
+                                    log2_ceil_usize(round_state.sumcheck_prover.evals.len())
+                                )
+                            )
+                        );
                     }
 
                     // merkle leaves
@@ -388,6 +396,20 @@ where
                     let commitment = extension_mmcs_ef.open_batch(*challenge, data);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
+
+                    dbg!(2);
+
+                    let folded_eval =
+                        commitment.opened_values[0].evaluate(&round_state.folding_randomness);
+                    assert_eq!(
+                        folded_eval,
+                        round_state.sumcheck_prover.evals.evaluate(
+                            &MultilinearPoint::expand_from_univariate(
+                                EF::from(round_state.next_domain_gen.exp_u64(*challenge as u64)),
+                                log2_ceil_usize(round_state.sumcheck_prover.evals.len())
+                            )
+                        )
+                    );
                 }
 
                 // merkle leaves
@@ -446,10 +468,7 @@ where
         let dst_randomness =
             &mut round_state.randomness_vec[start_idx..][..folding_randomness.len()];
 
-        for (dst, src) in dst_randomness
-            .iter_mut()
-            .zip(folding_randomness.iter())
-        {
+        for (dst, src) in dst_randomness.iter_mut().zip(folding_randomness.iter()) {
             *dst = *src;
         }
 
@@ -481,7 +500,6 @@ where
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(&round_state.sumcheck_prover.evals);
 
-       
         prover_state.pow_grinding(self.final_pow_bits);
 
         // Final verifier queries and answers. The indices are over the folded domain.
@@ -531,6 +549,18 @@ where
                     let commitment = extension_mmcs.open_batch(challenge, data);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
+
+                    let folded_eval =
+                        commitment.opened_values[0].evaluate(&round_state.folding_randomness);
+                    assert_eq!(
+                        folded_eval,
+                        round_state.sumcheck_prover.evals.evaluate(
+                            &MultilinearPoint::expand_from_univariate(
+                                EF::from(round_state.next_domain_gen.exp_u64(challenge as u64)),
+                                log2_ceil_usize(round_state.sumcheck_prover.evals.len())
+                            )
+                        )
+                    );
                 }
 
                 // merkle leaves
@@ -547,6 +577,9 @@ where
             }
         }
 
+        dbg!(prover_state.challenger().state());
+        dbg!(&round_state.folding_randomness);
+
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
             let final_folding_randomness = round_state
@@ -560,10 +593,7 @@ where
             let rand_dst = &mut round_state.randomness_vec
                 [start_idx..start_idx + final_folding_randomness.len()];
 
-            for (dst, src) in rand_dst
-                .iter_mut()
-                .zip(final_folding_randomness.iter())
-            {
+            for (dst, src) in rand_dst.iter_mut().zip(final_folding_randomness.iter()) {
                 *dst = *src;
             }
         }

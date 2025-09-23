@@ -59,7 +59,6 @@ where
             cur = cur.square(); // Compute y^(2^k) at each step
         }
 
-        res.reverse();
         Self(res)
     }
 

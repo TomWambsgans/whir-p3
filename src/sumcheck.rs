@@ -8,7 +8,7 @@ fn compress<F: Field, EF: ExtensionField<F>>(evals: &[F], r: EF) -> Vec<EF> {
     let fold = |slice: &[F]| -> EF { r * (slice[1] - slice[0]) + slice[0] };
     evals[..evals.len() / 2]
         .par_iter()
-        .zip(&evals[evals.len() / 2..])
+        .zip(evals[evals.len() / 2..].par_iter())
         .map(|(&a, &b)| fold(&[a, b]))
         .collect()
 }

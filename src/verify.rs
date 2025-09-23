@@ -367,12 +367,16 @@ where
             self.n_rounds(),
         )?;
 
+        dbg!(verifier_state.challenger().state());
+        dbg!(round_folding_randomness.last().unwrap());
+
         // Verify stir constraints directly on final polynomial
         stir_constraints
             .iter()
             .all(|c| verify_constraint(c, &final_evaluations))
             .then_some(())
-            .ok_or(ProofError::InvalidProof)?;
+            .ok_or(ProofError::InvalidProof)
+            .unwrap();
 
         let final_sumcheck_randomness = verify_sumcheck_rounds::<F, EF>(
             verifier_state,
