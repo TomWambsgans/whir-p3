@@ -4,7 +4,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
 use crate::{
-    fiat_shamir::{errors::ProofError, ChallengeSampler, LEAN_ISA_VECTOR_LEN},
+    fiat_shamir::{ChallengeSampler, LEAN_ISA_VECTOR_LEN, errors::ProofError},
     utils::pack_scalars_to_extension,
 };
 

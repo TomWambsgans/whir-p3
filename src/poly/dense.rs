@@ -38,11 +38,6 @@ impl<F: Field> DensePolynomial<F> {
 
     /// Evaluates `self` at the given `point` in `Self::Point`.
     pub fn evaluate<EF: ExtensionField<F>>(&self, point: EF) -> EF {
-        self.horner_evaluate(point)
-    }
-
-    // Horner's method for polynomial evaluation
-    fn horner_evaluate<EF: ExtensionField<F>>(&self, point: EF) -> EF {
         self.coeffs
             .iter()
             .rfold(EF::ZERO, move |result, coeff| result * point + *coeff)
@@ -57,23 +52,6 @@ impl<F: Field> DensePolynomial<F> {
         Self::new((0..=degree).map(|_| rng.random()).collect())
     }
 
-    /// Constructs the unique interpolating polynomial `P(x)` such that:
-    ///
-    /// \begin{equation}
-    /// P(x_i) = y_i \quad \text{for each } (x_i, y_i) \text{ in the input set}
-    /// \end{equation}
-    ///
-    /// The result is a dense univariate polynomial of degree at most `n - 1`, where `n` is the number of input points.
-    ///
-    /// # Parameters
-    ///
-    /// - `values`: A slice of `(x_i, y_i)` pairs, where each `x_i` is a field element from `S`,
-    ///   and each `y_i` is an extension field element from `F`.
-    ///
-    /// # Returns
-    ///
-    /// - `Some(P)`: The interpolating polynomial if all `x_i` are distinct.
-    /// - `None`: If any duplicate `x_i` values exist (even with equal `y_i`).
     pub fn lagrange_interpolation<S>(values: &[(S, F)]) -> Option<Self>
     where
         S: Field,
@@ -192,21 +170,6 @@ impl<F: Field> AddAssign<&Self> for DensePolynomial<F> {
 impl<F: Field> Mul for &DensePolynomial<F> {
     type Output = DensePolynomial<F>;
 
-    /// Multiplies two dense polynomials and returns the resulting polynomial.
-    ///
-    /// This function computes the product of `self` and `other` using the standard
-    /// schoolbook (naive) polynomial multiplication algorithm. If either polynomial
-    /// is zero, the result is the zero polynomial. The resulting polynomial's
-    /// coefficients are computed by summing the products of all pairs of coefficients
-    /// whose degrees add up to the same value.
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - The polynomial to multiply with `self`.
-    ///
-    /// # Returns
-    ///
-    /// A new `WhirDensePolynomial<F>` representing the product of the two input polynomials.
     fn mul(self, other: Self) -> DensePolynomial<F> {
         let mut prod = vec![F::ZERO; self.coeffs.len() + other.coeffs.len() - 1];
         for i in 0..self.coeffs.len() {

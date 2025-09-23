@@ -1,20 +1,19 @@
 use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::Field;
 
-use crate::{PF, fiat_shamir::verifier::ChallengerState};
+use crate::PF;
 
-pub mod errors;
-pub mod prover;
-pub mod verifier;
+mod errors;
+pub use errors::*;
+
+mod prover;
+pub use prover::*;
+
+mod verifier;
+pub use verifier::*;
 
 const LEAN_ISA_VECTOR_LEN: usize = 8;
 
-/// A trait for types that can sample challenges in a Fiat-Shamir-based protocol.
-///
-/// This trait abstracts over objects (such as prover or verifier states) that can
-/// deterministically generate random challenges from a transcript using a cryptographic
-/// challenger. The challenges are used to drive non-interactive proofs or interactive
-/// proof reductions.
 pub trait ChallengeSampler<F> {
     fn sample(&mut self) -> F;
 

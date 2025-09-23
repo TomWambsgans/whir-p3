@@ -7,15 +7,7 @@ use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use tracing_forest::{ForestLayer, util::LevelFilter};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
-use whir_p3::{
-    dft::EvalsDft,
-    fiat_shamir::{prover::ProverState, verifier::VerifierState},
-    poly::{
-        evals::EvaluationsList,
-        multilinear::{Evaluation, MultilinearPoint},
-    },
-    whir::config::*,
-};
+use whir_p3::*;
 
 // Commit A in F, B in EF
 // TODO there is a big overhead embedding overhead in the sumcheck
@@ -168,12 +160,8 @@ fn main() {
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
-    let parsed_commitment_a = params_a
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
-    let parsed_commitment_b = params_b
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
+    let parsed_commitment_a = params_a.parse_commitment(&mut verifier_state).unwrap();
+    let parsed_commitment_b = params_b.parse_commitment(&mut verifier_state).unwrap();
 
     let verif_time = Instant::now();
     params_a

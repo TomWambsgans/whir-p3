@@ -1,11 +1,30 @@
 use p3_field::{Field, PrimeCharacteristicRing};
 
-pub mod dft;
-pub mod fiat_shamir;
-pub mod poly;
-pub mod sumcheck;
-pub mod utils;
-pub mod whir;
+mod commit;
+pub use commit::*;
+
+mod open;
+pub use open::*;
+
+mod verify;
+pub use verify::*;
+
+mod dft;
+pub use dft::*;
+
+mod config;
+pub use config::*;
+
+mod fiat_shamir;
+pub use fiat_shamir::*;
+
+mod poly;
+pub use poly::*;
+
+mod utils;
+pub use utils::*;
+
+mod sumcheck;
 
 pub(crate) type PF<F> = <F as PrimeCharacteristicRing>::PrimeSubfield;
 pub(crate) type PFPacking<F> = <PF<F> as Field>::Packing;

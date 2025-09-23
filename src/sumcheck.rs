@@ -1,16 +1,8 @@
 use p3_field::{ExtensionField, Field};
 use rayon::prelude::*;
+use tracing::instrument;
 
-use crate::{
-    PF,
-    fiat_shamir::{FSChallenger, prover::ProverState},
-    poly::{
-        dense::DensePolynomial,
-        evals::EvaluationsList,
-        multilinear::{Evaluation, MultilinearPoint},
-    },
-    utils::compute_sparse_eval_eq,
-};
+use crate::*;
 
 const PARALLEL_THRESHOLD: usize = 4096;
 
@@ -113,6 +105,7 @@ fn round<F: Field, EF: ExtensionField<F> + ExtensionField<PF<EF>>>(
     r
 }
 
+#[instrument(skip_all, fields(num_variables = evals.num_variables()))]
 pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     evals: &[F],
     weights: &Vec<EF>,
@@ -291,6 +284,7 @@ impl<EF: Field + ExtensionField<PF<EF>>> SumcheckSingle<EF> {
     }
 }
 
+#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
 fn combine_statement<Base, EF>(statement: &[Evaluation<EF>], challenge: EF) -> (Vec<EF>, EF)
 where
     Base: Field,
