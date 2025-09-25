@@ -830,12 +830,16 @@ pub(crate) fn prepare_evals_for_fft<A: Copy + Send + Sync>(
     let n_blocks = 1 << folding_factor;
     let full_len = evals.len() << log_inv_rate;
     let block_size = full_len / n_blocks;
+    let log_block_size = log2_strict_usize(block_size);
+    let n_blocks_mask = n_blocks - 1;
+
     (0..full_len)
         .into_par_iter()
         .map(|i| {
-            let block_index = i % n_blocks;
-            let offset_in_block = i / n_blocks;
-            evals[(block_index * block_size + offset_in_block) >> log_inv_rate]
+            let block_index = i & n_blocks_mask;
+            let offset_in_block = i >> folding_factor;
+            let src_index = ((block_index << log_block_size) + offset_in_block) >> log_inv_rate;
+            unsafe { *evals.get_unchecked(src_index) }
         })
         .collect()
 }
