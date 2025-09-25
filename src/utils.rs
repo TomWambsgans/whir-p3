@@ -802,21 +802,42 @@ pub fn parallel_clone_vec<A: Clone + Send + Sync>(vec: &[A]) -> Vec<A> {
     res
 }
 
-pub fn parallel_repeat<A: Copy + Send + Sync>(src: &[A], n: usize) -> Vec<A> {
-    if src.len() * n < 1 << 15 {
+pub fn parallel_inner_repeat<A: Copy + Send + Sync>(src: &[A], n: usize) -> Vec<A> {
+    if src.len() * n <= 1 << 12 {
         // sequential repeat
-        src.repeat(n)
+        src.iter()
+            .flat_map(|&v| std::iter::repeat(v).take(n))
+            .collect()
     } else {
         let res = unsafe { uninitialized_vec::<A>(src.len() * n) };
         src.par_iter().enumerate().for_each(|(i, &v)| {
             for j in 0..n {
                 unsafe {
-                    std::ptr::write(res.as_ptr().cast_mut().add(i + j * src.len()), v);
+                    std::ptr::write(res.as_ptr().cast_mut().add(i * n + j), v);
                 }
             }
         });
         res
     }
+}
+
+pub(crate) fn prepare_evals_for_fft<A: Copy + Send + Sync>(
+    evals: &[A],
+    folding_factor: usize,
+    log_inv_rate: usize,
+) -> Vec<A> {
+    assert!(evals.len() % (1 << folding_factor) == 0);
+    let n_blocks = 1 << folding_factor;
+    let full_len = evals.len() << log_inv_rate;
+    let block_size = full_len / n_blocks;
+    (0..full_len)
+        .into_par_iter()
+        .map(|i| {
+            let block_index = i % n_blocks;
+            let offset_in_block = i / n_blocks;
+            evals[(block_index * block_size + offset_in_block) >> log_inv_rate]
+        })
+        .collect()
 }
 
 /// Recursively computes a chunk of the scaled multilinear equality polynomial over the Boolean hypercube.

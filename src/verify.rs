@@ -368,7 +368,6 @@ where
         )?;
 
         dbg!(verifier_state.challenger().state());
-        dbg!(round_folding_randomness.last().unwrap());
 
         // Verify stir constraints directly on final polynomial
         stir_constraints
@@ -400,7 +399,7 @@ where
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
         if claimed_sum != evaluation_of_weights * final_value {
-            return Err(ProofError::InvalidProof);
+            panic!();
         }
 
         Ok(folding_randomness)
@@ -735,14 +734,12 @@ where
         constraints: &[(Vec<EF>, Vec<Evaluation<EF>>)],
         mut point: MultilinearPoint<EF>,
     ) -> EF {
-        let mut num_variables = self.num_variables;
         let mut value = EF::ZERO;
 
         for (round, (randomness, constraints)) in constraints.iter().enumerate() {
             assert_eq!(randomness.len(), constraints.len());
             if round > 0 {
-                num_variables -= self.folding_factor.at_round(round - 1);
-                point = MultilinearPoint(point[..num_variables].to_vec());
+                point = MultilinearPoint(point[self.folding_factor.at_round(round - 1)..].to_vec());
             }
             value += constraints
                 .iter()

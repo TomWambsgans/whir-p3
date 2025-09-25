@@ -3,7 +3,7 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
-use p3_util::log2_ceil_usize;
+use p3_util::{log2_ceil_usize, log2_strict_usize};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
@@ -213,17 +213,20 @@ where
         let new_domain_size = round_state.domain_size / domain_reduction;
         let inv_rate = new_domain_size / folded_evaluations.num_evals();
         let folded_matrix = info_span!("fold matrix").in_scope(|| {
-            let evals_repeated = info_span!("repeating evals")
-                .in_scope(|| parallel_repeat(folded_evaluations, inv_rate));
-            // Do DFT on only interleaved polys to be folded.
+            let evals_for_fft = prepare_evals_for_fft(
+                &folded_evaluations,
+                folding_factor_next,
+                log2_strict_usize(inv_rate),
+            );
+
             info_span!(
                 "dft",
-                height = evals_repeated.len() >> folding_factor_next,
+                height = evals_for_fft.len() >> folding_factor_next,
                 width = 1 << folding_factor_next
             )
             .in_scope(|| {
                 dft.dft_algebra_batch_by_evals(RowMajorMatrix::new(
-                    evals_repeated,
+                    evals_for_fft,
                     1 << folding_factor_next,
                 ))
             })
@@ -347,24 +350,6 @@ where
                             .open_batch(*challenge, &round_state.commitment_merkle_prover_data_a);
                         answers.push(commitment.opened_values[0].clone());
                         merkle_proofs.push(commitment.opening_proof);
-
-                        dbg!(1);
-
-                        let mut folded_rev = round_state.folding_randomness.clone();
-                        folded_rev.reverse();
-                        let folded_eval =
-                            commitment.opened_values[0].evaluate(&folded_rev);
-                        assert_eq!(
-                            folded_eval,
-                            round_state.sumcheck_prover.evals.evaluate(
-                                &MultilinearPoint::expand_from_univariate(
-                                    EF::from(
-                                        round_state.next_domain_gen.exp_u64(*challenge as u64)
-                                    ),
-                                    log2_ceil_usize(round_state.sumcheck_prover.evals.len())
-                                )
-                            )
-                        );
                     }
 
                     // merkle leaves
@@ -396,8 +381,6 @@ where
                     let commitment = extension_mmcs_ef.open_batch(*challenge, data);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
-
-                    dbg!(2);
 
                     let folded_eval =
                         commitment.opened_values[0].evaluate(&round_state.folding_randomness);
@@ -576,9 +559,6 @@ where
                 }
             }
         }
-
-        dbg!(prover_state.challenger().state());
-        dbg!(&round_state.folding_randomness);
 
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
