@@ -64,7 +64,9 @@ tracing-subscriber = { version = "0.3.17", default-features = false, features = 
     "env-filter",
 ] }
 rand = "0.9.2"
-clap = { version = "4.4.17", features = ["derive"] }
+fiat-shamir = { git = "https://github.com/leanEthereum/fiat-shamir.git" }
+multilinear-toolkit = { git = "https://github.com/leanEthereum/multilinear-toolkit.git" }
+
 
 [dev-dependencies]
 criterion = "0.6"

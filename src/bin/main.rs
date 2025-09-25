@@ -1,10 +1,11 @@
-use std::time::Instant;
-
+use fiat_shamir::*;
+use multilinear_toolkit::*;
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use std::time::Instant;
 // use tracing_forest::{ForestLayer, util::LevelFilter};
 // use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::*;
@@ -65,7 +66,6 @@ fn main() {
         rs_domain_initial_reduction_factor: 5,
     };
 
-  
     let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
 
     // println!("Using parameters:\n{}", params.to_string());
@@ -155,11 +155,7 @@ fn main() {
 
     let verif_time = Instant::now();
     params_a
-        .verify(
-            &mut verifier_state,
-            &parsed_commitment_a,
-            statement_a,
-        )
+        .verify(&mut verifier_state, &parsed_commitment_a, statement_a)
         .unwrap();
     let verify_time = verif_time.elapsed();
 

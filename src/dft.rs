@@ -557,6 +557,7 @@ impl<F: Field> Butterfly<F> for EvalsButterfly<F> {
 #[cfg(test)]
 mod tests {
     use crate::*;
+    use multilinear_toolkit::{EvaluationsList, MultilinearPoint};
     use p3_field::TwoAdicField;
     use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
     use p3_koala_bear::KoalaBear;

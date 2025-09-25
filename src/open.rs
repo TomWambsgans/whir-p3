@@ -1,3 +1,6 @@
+use fiat_shamir::PF;
+use fiat_shamir::*;
+use multilinear_toolkit::*;
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
@@ -8,7 +11,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
-use crate::{config::WhirConfig, sumcheck::SumcheckSingle, *};
+use crate::{config::WhirConfig, *};
 
 pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
 pub type Leafs<F> = Vec<Vec<F>>;
@@ -439,13 +442,11 @@ where
             &stir_combination_randomness,
         );
 
-        let folding_randomness = round_state
-            .sumcheck_prover
-            .run_sumcheck_many_rounds::<PF<EF>>(
-                prover_state,
-                folding_factor_next,
-                round_params.folding_pow_bits,
-            );
+        let folding_randomness = round_state.sumcheck_prover.run_sumcheck_many_rounds(
+            prover_state,
+            folding_factor_next,
+            round_params.folding_pow_bits,
+        );
 
         let start_idx = self.folding_factor.total_number(round_index);
         let dst_randomness =
@@ -562,13 +563,11 @@ where
 
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
-            let final_folding_randomness = round_state
-                .sumcheck_prover
-                .run_sumcheck_many_rounds::<PF<EF>>(
-                    prover_state,
-                    self.final_sumcheck_rounds,
-                    self.final_folding_pow_bits,
-                );
+            let final_folding_randomness = round_state.sumcheck_prover.run_sumcheck_many_rounds(
+                prover_state,
+                self.final_sumcheck_rounds,
+                self.final_folding_pow_bits,
+            );
             let start_idx = self.folding_factor.total_number(round_index);
             let rand_dst = &mut round_state.randomness_vec
                 [start_idx..start_idx + final_folding_randomness.len()];
@@ -618,6 +617,158 @@ where
             .collect();
 
         Ok((ood_challenges, stir_challenges, stir_challenges_indexes))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SumcheckSingle<EF> {
+    /// Evaluations of the polynomial `p(X)`.
+    pub(crate) evals: Vec<EF>,
+    /// Evaluations of the equality polynomial used for enforcing constraints.
+    pub(crate) weights: Vec<EF>,
+    /// Accumulated sum incorporating equality constraints.
+    pub(crate) sum: EF,
+}
+
+impl<EF: Field> SumcheckSingle<EF>
+where
+    EF: ExtensionField<PF<EF>>,
+{
+    pub(crate) fn add_new_equality(
+        &mut self,
+        points: &[MultilinearPoint<EF>],
+        evaluations: &[EF],
+        combination_randomness: &[EF],
+    ) {
+        assert_eq!(combination_randomness.len(), points.len());
+        assert_eq!(evaluations.len(), points.len());
+
+        points
+            .iter()
+            .zip(combination_randomness.iter())
+            .for_each(|(point, &rand)| {
+                compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
+            });
+
+        self.sum += combination_randomness
+            .iter()
+            .zip(evaluations.iter())
+            .map(|(&rand, &eval)| rand * eval)
+            .sum::<EF>();
+    }
+
+    pub(crate) fn add_new_base_equality<F: Field>(
+        &mut self,
+        points: &[MultilinearPoint<F>],
+        evaluations: &[EF],
+        combination_randomness: &[EF],
+    ) where
+        EF: ExtensionField<F>,
+    {
+        assert_eq!(combination_randomness.len(), points.len());
+        assert_eq!(evaluations.len(), points.len());
+
+        // Parallel update of weight buffer
+
+        points
+            .iter()
+            .zip(combination_randomness.iter())
+            .for_each(|(point, &rand)| {
+                compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
+            });
+
+        // Accumulate the weighted sum (cheap, done sequentially)
+        self.sum += combination_randomness
+            .iter()
+            .zip(evaluations.iter())
+            .map(|(&rand, &eval)| rand * eval)
+            .sum::<EF>();
+    }
+
+    fn run_sumcheck_many_rounds(
+        &mut self,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        folding_factor: usize,
+        _pow_bits: usize, // TODO pow grinding
+    ) -> MultilinearPoint<EF> {
+        let num_vars_start = log2_strict_usize(self.evals.len());
+        let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
+            1,
+            MleGroupOwned::Extension(vec![
+                std::mem::take(&mut self.evals),
+                std::mem::take(&mut self.weights),
+            ]),
+            &ProductComputation,
+            &ProductComputation,
+            &[],
+            None,
+            false,
+            prover_state,
+            self.sum,
+            None,
+            folding_factor,
+        );
+
+        self.sum = new_sum;
+        let mut folded = folds.as_owned().unwrap();
+        self.evals = std::mem::take(&mut folded.as_extension_mut().unwrap()[0]);
+        self.weights = std::mem::take(&mut folded.as_extension_mut().unwrap()[1]);
+
+        assert_eq!(
+            log2_strict_usize(self.evals.len()),
+            num_vars_start - folding_factor
+        );
+
+        challenges
+    }
+
+    pub(crate) fn run_initial_sumcheck_rounds<F: Field>(
+        evals: &[F],
+        statement: &[Evaluation<EF>],
+        combination_randomness: EF,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        folding_factor: usize,
+        _pow_bits: usize, // TODO
+    ) -> (Self, MultilinearPoint<EF>)
+    where
+        EF: ExtensionField<F>,
+    {
+        assert_ne!(folding_factor, 0);
+        let mut res = Vec::with_capacity(folding_factor);
+
+        let (mut weights, mut sum) =
+            combine_statement::<PF<EF>, EF>(statement, combination_randomness);
+
+        // In the first round base field evaluations are folded into extension field elements
+        let sumcheck_poly = compute_sumcheck_polynomial(evals, &weights, sum);
+        prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
+
+        // TODO: re-enable PoW grinding
+        // prover_state.pow_grinding(pow_bits);
+
+        // Sample verifier challenge.
+        let r: EF = prover_state.sample();
+
+        fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
+        let compressed_evals = fold_multilinear_in_large_field(&evals, &[(EF::ONE - r), r]);
+
+        sum = sumcheck_poly.evaluate(r);
+
+        res.push(r);
+
+        let mut sumcheck = Self {
+            evals: compressed_evals,
+            weights,
+            sum,
+        };
+
+        // Apply rest of sumcheck rounds
+        let remaining_challenges =
+            sumcheck.run_sumcheck_many_rounds(prover_state, folding_factor - 1, _pow_bits);
+
+        res.extend(remaining_challenges.0);
+
+        (sumcheck, MultilinearPoint(res))
     }
 }
 
@@ -838,4 +989,80 @@ fn add_constraints_in_front<EF: Field>(
 
     // Insert all new constraints at the beginning of the existing list.
     statements.splice(0..0, new_constraints);
+}
+
+#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
+fn combine_statement<Base, EF>(statement: &[Evaluation<EF>], challenge: EF) -> (Vec<EF>, EF)
+where
+    Base: Field,
+    EF: ExtensionField<Base>,
+{
+    let num_variables = statement[0].num_variables();
+    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
+
+    let mut combined_evals = EF::zero_vec(1 << num_variables);
+    let (combined_sum, _) = statement.iter().fold(
+        (EF::ZERO, EF::ONE),
+        |(mut acc_sum, gamma_pow), constraint| {
+            compute_sparse_eval_eq::<Base, EF>(&constraint.point, &mut combined_evals, gamma_pow);
+            acc_sum += constraint.value * gamma_pow;
+            (acc_sum, gamma_pow * challenge)
+        },
+    );
+
+    (combined_evals, combined_sum)
+}
+
+#[instrument(skip_all, fields(num_variables = evals.num_variables()))]
+pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
+    evals: &[F],
+    weights: &Vec<EF>,
+    sum: EF,
+) -> DensePolynomial<EF> {
+    assert!(evals.len().is_power_of_two());
+
+    let (c0, c2) = (0..evals.len() / 2)
+        .into_par_iter()
+        .map(|i| {
+            sumcheck_quadratic::<F, EF>(
+                evals[i],
+                evals[i + evals.len() / 2],
+                weights[i],
+                weights[i + evals.len() / 2],
+            )
+        })
+        .reduce(
+            || (EF::ZERO, EF::ZERO),
+            |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
+        );
+
+    let c1 = sum - c0.double() - c2;
+
+    let eval_0 = c0;
+    let eval_1 = c0 + c1 + c2;
+    let eval_2 = eval_1 + c1 + c2 + c2.double();
+
+    DensePolynomial::lagrange_interpolation(&[
+        (F::ZERO, eval_0),
+        (F::ONE, eval_1),
+        (F::TWO, eval_2),
+    ])
+    .expect("Failed to interpolate sumcheck polynomial")
+}
+
+#[inline]
+pub(crate) fn sumcheck_quadratic<F, EF>(p_0: F, p_1: F, eq_0: EF, eq_1: EF) -> (EF, EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    // Compute the constant coefficient:
+    // p(0) * w(0)
+    let constant = eq_0 * p_0;
+
+    // Compute the quadratic coefficient:
+    // (p(1) - p(0)) * (w(1) - w(0))
+    let quadratic = (eq_1 - eq_0) * (p_1 - p_0);
+
+    (constant, quadratic)
 }
