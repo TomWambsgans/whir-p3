@@ -149,6 +149,86 @@ where
     }
 }
 
+#[inline]
+pub fn compute_eval_eq_packed<F, EF, const INITIALIZED: bool>(
+    eval: &[EF],
+    out: &mut [EF::ExtensionPacking],
+    scalar: EF,
+) where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    // It's possible for this to be called with F = EF (Despite F actually being an extension field).
+    //
+    // IMPORTANT: We previously checked here that `packing_width > 1`,
+    // but this check is **not viable** for Goldilocks on Neon or when not using `target-cpu=native`.
+    //
+    // Why? Because Neon SIMD vectors are 128 bits and Goldilocks elements are already 64 bits,
+    // so no packing happens (width stays 1), and there's no performance advantage.
+    //
+    // Be careful: this means code relying on packing optimizations should **not assume**
+    // `packing_width > 1` is always true.
+    let packing_width = F::Packing::WIDTH;
+    // debug_assert!(packing_width > 1);
+
+    assert!(log2_strict_usize(packing_width) <= eval.len());
+
+    // Ensure that the output buffer size is correct:
+    // It should be of size `2^n`, where `n` is the number of variables.
+    debug_assert_eq!(out.len(), 1 << eval.len());
+
+    // If the number of variables is small, there is no need to use
+    // parallelization or packings.
+    if eval.len() <= packing_width + 1 + LOG_NUM_THREADS {
+        // A basic recursive approach.
+        let mut output_no_packing = EF::zero_vec(out.len());
+        eval_eq_basic::<_, _, _, INITIALIZED>(eval, &mut output_no_packing, scalar);
+        out.par_iter_mut()
+            .zip(output_no_packing.into_par_iter().chunks(packing_width))
+            .for_each(|(out_elem, chunk)| {
+                if INITIALIZED {
+                    *out_elem += EF::ExtensionPacking::from_ext_slice(&chunk);
+                } else {
+                    *out_elem = EF::ExtensionPacking::from_ext_slice(&chunk);
+                }
+            });
+    } else {
+        let log_packing_width = log2_strict_usize(packing_width);
+        let eval_len_min_packing = eval.len() - log_packing_width;
+
+        // We split eval into three parts:
+        // - eval[..LOG_NUM_THREADS] (the first LOG_NUM_THREADS elements)
+        // - eval[LOG_NUM_THREADS..eval_len_min_packing] (the middle elements)
+        // - eval[eval_len_min_packing..] (the last log_packing_width elements)
+
+        // The middle elements are the ones which will be computed in parallel.
+        // The last log_packing_width elements are the ones which will be packed.
+
+        // We make a buffer of elements of size `NUM_THREADS`.
+        let mut parallel_buffer = EF::ExtensionPacking::zero_vec(NUM_THREADS);
+        let out_chunk_size = out.len() / NUM_THREADS;
+
+        // Compute the equality polynomial corresponding to the last log_packing_width elements
+        // and pack these.
+        parallel_buffer[0] = packed_eq_poly(&eval[eval_len_min_packing..], scalar);
+
+        // Update the buffer so it contains the evaluations of the equality polynomial
+        // with respect to parts one and three.
+        fill_buffer(eval[..LOG_NUM_THREADS].iter().rev(), &mut parallel_buffer);
+
+        // Finally do all computations involving the middle elements in parallel.
+        out.par_chunks_exact_mut(out_chunk_size)
+            .zip(parallel_buffer.par_iter())
+            .for_each(|(out_chunk, buffer_val)| {
+                eval_eq_with_packed_output::<_, _, INITIALIZED>(
+                    &eval[LOG_NUM_THREADS..(eval.len() - log_packing_width)],
+                    out_chunk,
+                    *buffer_val,
+                );
+            });
+    }
+}
+
 /// Computes the equality polynomial evaluations efficiently.
 ///
 /// This function is similar to [`eval_eq`], but it assumes that we want to evaluate
@@ -488,19 +568,19 @@ where
             // Manually unroll for single variable case
             let eq_evaluations = eval_eq_1(eval, scalar);
 
-            add_or_set::<_, INITIALIZED>(out, &eq_evaluations);
+            add_or_set_f::<_, INITIALIZED>(out, &eq_evaluations);
         }
         2 => {
             // Manually unroll for two variable case
             let eq_evaluations = eval_eq_2(eval, scalar);
 
-            add_or_set::<_, INITIALIZED>(out, &eq_evaluations);
+            add_or_set_f::<_, INITIALIZED>(out, &eq_evaluations);
         }
         3 => {
             // Manually unroll for three variable case
             let eq_evaluations = eval_eq_3(eval, scalar);
 
-            add_or_set::<_, INITIALIZED>(out, &eq_evaluations);
+            add_or_set_f::<_, INITIALIZED>(out, &eq_evaluations);
         }
         _ => {
             let (&x, tail) = eval.split_first().unwrap();
@@ -558,21 +638,21 @@ fn eval_eq_packed<F: Field, EF: ExtensionField<F>, const INITIALIZED: bool>(
     match eval.len() {
         0 => {
             let result: Vec<EF> = EF::ExtensionPacking::to_ext_iter([scalar]).collect();
-            add_or_set::<_, INITIALIZED>(out, &result);
+            add_or_set_f::<_, INITIALIZED>(out, &result);
         }
         1 => {
             // Manually unroll for single variable case
             let eq_evaluations = eval_eq_1(eval, scalar);
 
             let result: Vec<EF> = EF::ExtensionPacking::to_ext_iter(eq_evaluations).collect();
-            add_or_set::<_, INITIALIZED>(out, &result);
+            add_or_set_f::<_, INITIALIZED>(out, &result);
         }
         2 => {
             // Manually unroll for two variables case
             let eq_evaluations = eval_eq_2(eval, scalar);
 
             let result: Vec<EF> = EF::ExtensionPacking::to_ext_iter(eq_evaluations).collect();
-            add_or_set::<_, INITIALIZED>(out, &result);
+            add_or_set_f::<_, INITIALIZED>(out, &result);
         }
         3 => {
             const EVAL_LEN: usize = 8;
@@ -622,6 +702,64 @@ fn eval_eq_packed<F: Field, EF: ExtensionField<F>, const INITIALIZED: bool>(
             // Probably related to nice cache locality.
             eval_eq_packed::<_, _, INITIALIZED>(tail, low, s0);
             eval_eq_packed::<_, _, INITIALIZED>(tail, high, s1);
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+#[inline]
+fn eval_eq_with_packed_output<F: Field, EF: ExtensionField<F>, const INITIALIZED: bool>(
+    eval: &[EF],
+    out: &mut [EF::ExtensionPacking],
+    scalar: EF::ExtensionPacking,
+) {
+    // Ensure that the output buffer size is correct:
+    // It should be of size `2^n`, where `n` is the number of variables.
+    let width = F::Packing::WIDTH;
+    debug_assert_eq!(out.len(), width << eval.len());
+
+    match eval.len() {
+        0 => {
+            add_or_set_pf::<_, INITIALIZED>(out, &[scalar]);
+        }
+        1 => {
+            // Manually unroll for single variable case
+            let eq_evaluations = eval_eq_1(eval, scalar);
+            add_or_set_pf::<_, INITIALIZED>(out, &eq_evaluations);
+        }
+        2 => {
+            // Manually unroll for two variables case
+            let eq_evaluations = eval_eq_2(eval, scalar);
+            add_or_set_pf::<_, INITIALIZED>(out, &eq_evaluations);
+        }
+        3 => {
+            const EVAL_LEN: usize = 8;
+
+            // Manually unroll for three variable case
+            let eq_evaluations = eval_eq_3(eval, scalar);
+            add_or_set_pf::<_, INITIALIZED>(out, &eq_evaluations);
+        }
+        _ => {
+            let (&x, tail) = eval.split_first().unwrap();
+
+            // Divide the output buffer into two halves: one for `X_i = 0` and one for `X_i = 1`
+            let (low, high) = out.split_at_mut(out.len() / 2);
+
+            // Compute weight updates for the two branches:
+            // - `s0` corresponds to the case when `X_i = 0`
+            // - `s1` corresponds to the case when `X_i = 1`
+            //
+            // Mathematically, this follows the recurrence:
+            // ```text
+            // eq_{X1, ..., Xn}(X) = (1 - X_1) * eq_{X2, ..., Xn}(X) + X_1 * eq_{X2, ..., Xn}(X)
+            // ```
+            let s1 = scalar * x; // Contribution when `X_i = 1`
+            let s0 = scalar - s1; // Contribution when `X_i = 0`
+
+            // The recursive approach turns out to be faster than the iterative one here.
+            // Probably related to nice cache locality.
+            eval_eq_with_packed_output::<_, _, INITIALIZED>(tail, low, s0);
+            eval_eq_with_packed_output::<_, _, INITIALIZED>(tail, high, s1);
         }
     }
 }
@@ -719,10 +857,23 @@ fn base_eval_eq_packed<F, EF, const INITIALIZED: bool>(
 /// If the output buffer is already initialized, it adds the evaluations otherwise
 /// it copies the evaluations into the buffer directly.
 #[inline]
-fn add_or_set<F: Field, const INITIALIZED: bool>(out: &mut [F], evaluations: &[F]) {
+fn add_or_set_f<F: Field, const INITIALIZED: bool>(out: &mut [F], evaluations: &[F]) {
     debug_assert_eq!(out.len(), evaluations.len());
     if INITIALIZED {
         F::add_slices(out, evaluations);
+    } else {
+        out.copy_from_slice(evaluations);
+    }
+}
+
+#[inline]
+fn add_or_set_pf<F: PrimeCharacteristicRing + Copy, const INITIALIZED: bool>(
+    out: &mut [F],
+    evaluations: &[F],
+) {
+    debug_assert_eq!(out.len(), evaluations.len());
+    if INITIALIZED {
+        out.iter_mut().zip(evaluations).for_each(|(o, &e)| *o += e);
     } else {
         out.copy_from_slice(evaluations);
     }
@@ -1078,8 +1229,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
+    use p3_field::Field;
+    use p3_koala_bear::QuinticExtensionFieldKB;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+
     use super::*;
     type F = p3_koala_bear::KoalaBear;
+    type EF = QuinticExtensionFieldKB;
 
     #[test]
     fn test() {
@@ -1106,5 +1264,30 @@ mod tests {
         compute_sparse_eval_eq(&eval, &mut out_structured, scalar);
         compute_eval_eq::<F, F, true>(&eval, &mut out_unstructured, scalar);
         assert_eq!(out_structured, out_unstructured);
+    }
+
+    #[test]
+    fn test_packed_eval_eq() {
+        let n_vars = 20;
+        let mut rng = StdRng::seed_from_u64(0);
+        let eval = (0..n_vars).map(|_| rng.random()).collect::<Vec<EF>>();
+        let scalar: EF = rng.random();
+
+        let mut out_1 = EF::zero_vec(1 << n_vars);
+        let time = Instant::now();
+        compute_eval_eq::<F, EF, true>(&eval, &mut out_1, scalar);
+        println!("eval_eq without output NOT PACKED: {:?}", time.elapsed());
+
+        let packing_width = <F as Field>::Packing::WIDTH;
+        let log_packing_width = log2_strict_usize(packing_width);
+        let mut out_2 = <EF as ExtensionField<F>>::ExtensionPacking::zero_vec(
+            1 << (n_vars - log_packing_width),
+        );
+        let time = Instant::now();
+        compute_eval_eq_packed::<F, _, true>(&eval, &mut out_2, scalar);
+        println!("eval_eq with output PACKED: {:?}", time.elapsed());
+
+        let unpacked_out_2: Vec<EF> = <EF as ExtensionField<F>>::ExtensionPacking::to_ext_iter_vec(out_2);
+        assert_eq!(out_1, unpacked_out_2);
     }
 }
