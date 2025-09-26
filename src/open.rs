@@ -147,11 +147,10 @@ where
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<EF>: TwoAdicField,
     {
-        // Xn PolA + (1 - Xn) PolB
+        // (1 - X).PolB + X.PolA
 
         assert_eq!(polynomial_a.num_variables(), self.num_variables,);
         assert!(polynomial_a.num_variables() >= polynomial_b.num_variables());
-        // Initialize the round state with inputs and initial polynomial data
         let mut round_state = RoundState::initialize_first_round_state_batch(
             self,
             prover_state,
@@ -164,19 +163,11 @@ where
         )
         .unwrap();
 
-        // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
             self.round(round, dft, prover_state, &mut round_state)
                 .unwrap();
         }
-
-        // Reverse the vector of verifier challenges (used as evaluation point)
-        //
-        // These challenges were pushed in round order; we reverse them to use as a single
-        // evaluation point for final statement consistency checks.
-        let constraint_eval = MultilinearPoint(round_state.randomness_vec);
-
-        constraint_eval
+        MultilinearPoint(round_state.randomness_vec)
     }
 
     fn round(
@@ -326,16 +317,15 @@ where
 
                     let mut stir_evaluations = Vec::new();
                     for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
-                        let a_trunc = round_state.folding_randomness
-                            [..round_state.folding_randomness.len() - 1]
-                            .to_vec();
-                        let vars_b = answer_b.len().ilog2() as usize;
+                        let vars_a = log2_strict_usize(answer_a.len());
+                        let vars_b = log2_strict_usize(answer_b.len());
+                        let a_trunc = round_state.folding_randomness[1..].to_vec();
                         let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
-                        let b_trunc = round_state.folding_randomness[..vars_b].to_vec();
+                        let b_trunc =
+                            round_state.folding_randomness[vars_a - vars_b + 1..].to_vec();
                         let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
-                        let last_fold_rand_a = round_state.folding_randomness
-                            [round_state.folding_randomness.len() - 1];
-                        let last_fold_rand_b = round_state.folding_randomness[vars_b..]
+                        let last_fold_rand_a = round_state.folding_randomness[0];
+                        let last_fold_rand_b = round_state.folding_randomness[..vars_a - vars_b + 1]
                             .iter()
                             .map(|&x| EF::ONE - x)
                             .product::<EF>();
@@ -886,42 +876,35 @@ where
 
         for (point, evaluation) in witness_a.ood_points.into_iter().zip(witness_a.ood_answers) {
             let mut point = MultilinearPoint::expand_from_univariate(point, n_vars_a);
-            point.push(EF::ONE);
+            point.insert(0, EF::ONE);
             statement.push(Evaluation::new(point, evaluation));
         }
         for mut constraint in statement_a {
-            constraint.point.push(EF::ONE);
+            constraint.point.insert(0, EF::ONE);
             statement.push(constraint);
         }
         for (point, evaluation) in witness_b.ood_points.into_iter().zip(witness_b.ood_answers) {
             let mut point = MultilinearPoint::expand_from_univariate(point, n_vars_b);
-            point.extend(vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
+            point.splice(0..0, vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
             statement.push(Evaluation::new(point, evaluation));
         }
         for mut constraint in statement_b {
             constraint
                 .point
-                .extend(vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
+                .splice(0..0, vec![EF::ZERO; n_vars_a + 1 - n_vars_b]);
             statement.push(constraint);
         }
 
-        let combination_randomness_gen: EF = prover_state.sample();
-
         let mut polynomial = EF::zero_vec(polynomial_a.num_evals() * 2);
-        polynomial
-            .par_iter_mut()
-            .step_by(1 << (1 + n_vars_a - n_vars_b))
-            .enumerate()
-            .for_each(|(i, eval)| {
-                *eval = polynomial_b[i];
-            });
-        polynomial[1..]
-            .par_iter_mut()
-            .step_by(2)
-            .enumerate()
-            .for_each(|(i, eval)| {
-                *eval = EF::from(polynomial_a[i]); // TODO embedding overhead
-            });
+        parallel_clone(&polynomial_b, &mut polynomial[..polynomial_b.len()]);
+        polynomial_a
+            .par_iter()
+            .zip(polynomial[polynomial_a.len()..].par_iter_mut())
+            .for_each(|(a, b)| {
+                *b = EF::from(*a);
+            }); // TODO embedding overhead
+
+        let combination_randomness_gen: EF = prover_state.sample();
 
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::run_initial_sumcheck_rounds(
             &polynomial,

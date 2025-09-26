@@ -129,7 +129,7 @@ where
             .into_iter()
             .chain(statement_a)
             .map(|mut c| {
-                c.point.push(EF::ONE);
+                c.point.insert(0, EF::ONE);
                 c
             })
             .collect();
@@ -142,7 +142,7 @@ where
                 .map(|mut c| {
                     let ending_zeros =
                         parsed_commitment_a.num_variables + 1 - parsed_commitment_b.num_variables;
-                    c.point.extend(vec![EF::ZERO; ending_zeros]);
+                    c.point.splice(0..0, vec![EF::ZERO; ending_zeros]);
                     c
                 }),
         );
@@ -252,7 +252,7 @@ where
         );
 
         let evaluation_of_weights =
-            self.eval_constraints_poly(&round_constraints, folding_randomness.clone());
+            self.eval_constraints_poly(&round_constraints, folding_randomness.clone(), true);
 
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
@@ -368,7 +368,6 @@ where
             self.n_rounds(),
         )?;
 
-
         // Verify stir constraints directly on final polynomial
         stir_constraints
             .iter()
@@ -394,7 +393,7 @@ where
         );
 
         let evaluation_of_weights =
-            self.eval_constraints_poly(&round_constraints, folding_randomness.clone());
+            self.eval_constraints_poly(&round_constraints, folding_randomness.clone(), false);
 
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
@@ -575,18 +574,18 @@ where
             .into_iter()
             .zip(answers_b)
             .map(|(answer_a, answer_b)| {
-                let eval_a = answer_a.evaluate(&MultilinearPoint(
-                    folding_randomness[..folding_randomness.len() - 1].to_vec(),
-                ));
-                let vars_b = answer_b.len().ilog2() as usize;
-                let eval_b =
-                    answer_b.evaluate(&MultilinearPoint(folding_randomness[..vars_b].to_vec()));
-                eval_a * folding_randomness[folding_randomness.len() - 1]
-                    + eval_b
-                        * folding_randomness[vars_b..]
-                            .iter()
-                            .map(|&x| EF::ONE - x)
-                            .product::<EF>()
+                let vars_a = log2_strict_usize(answer_a.len());
+                let vars_b = log2_strict_usize(answer_b.len());
+                let a_trunc = folding_randomness[1..].to_vec();
+                let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
+                let b_trunc = folding_randomness[vars_a - vars_b + 1..].to_vec();
+                let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
+                let last_fold_rand_a = folding_randomness[0];
+                let last_fold_rand_b = folding_randomness[..vars_a - vars_b + 1]
+                    .iter()
+                    .map(|&x| EF::ONE - x)
+                    .product::<EF>();
+                eval_a * last_fold_rand_a + eval_b * last_fold_rand_b
             })
             .collect();
 
@@ -733,13 +732,18 @@ where
         &self,
         constraints: &[(Vec<EF>, Vec<Evaluation<EF>>)],
         mut point: MultilinearPoint<EF>,
+        batched: bool,
     ) -> EF {
         let mut value = EF::ZERO;
 
         for (round, (randomness, constraints)) in constraints.iter().enumerate() {
             assert_eq!(randomness.len(), constraints.len());
             if round > 0 {
-                point = MultilinearPoint(point[self.folding_factor.at_round(round - 1)..].to_vec());
+                let mut k = self.folding_factor.at_round(round - 1);
+                if round == 1 && batched {
+                    k += 1;
+                }
+                point = MultilinearPoint(point[k..].to_vec());
             }
             value += constraints
                 .iter()
