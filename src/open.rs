@@ -384,18 +384,6 @@ where
                     let commitment = extension_mmcs_ef.open_batch(*challenge, data);
                     answers.push(commitment.opened_values[0].clone());
                     merkle_proofs.push(commitment.opening_proof);
-
-                    let folded_eval =
-                        commitment.opened_values[0].evaluate(&round_state.folding_randomness);
-                    assert_eq!(
-                        folded_eval,
-                        round_state.sumcheck_prover.evals.evaluate(
-                            &MultilinearPoint::expand_from_univariate(
-                                EF::from(round_state.next_domain_gen.exp_u64(*challenge as u64)),
-                                log2_ceil_usize(round_state.sumcheck_prover.evals.len())
-                            )
-                        )
-                    );
                 }
 
                 // merkle leaves
@@ -749,8 +737,10 @@ where
         // Sample verifier challenge.
         let r: EF = prover_state.sample();
 
-        fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
-        let compressed_evals = fold_multilinear_in_large_field(&evals, &[(EF::ONE - r), r]);
+        let compressed_evals = info_span!("initial compression").in_scope(|| {
+            fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
+            fold_multilinear(&evals, &[(EF::ONE - r), r], &|a, b| b * a)
+        });
 
         sum = sumcheck_poly.evaluate(r);
 

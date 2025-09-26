@@ -368,7 +368,6 @@ where
             self.n_rounds(),
         )?;
 
-        dbg!(verifier_state.challenger().state());
 
         // Verify stir constraints directly on final polynomial
         stir_constraints

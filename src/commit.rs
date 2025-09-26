@@ -12,6 +12,7 @@ use p3_matrix::{
 use p3_merkle_tree::{MerkleTree, MerkleTreeMmcs};
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use crate::*;
 
@@ -53,6 +54,7 @@ where
     /// - Constructs a Merkle tree from the evaluations.
     /// - Computes out-of-domain (OOD) challenge points and their evaluations.
     /// - Returns a `Witness` containing the commitment data.
+    #[instrument(skip_all)]
     pub fn commit(
         &self,
         dft: &EvalsDft<PF<EF>>,

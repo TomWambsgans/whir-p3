@@ -6,8 +6,8 @@ use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::time::Instant;
-// use tracing_forest::{ForestLayer, util::LevelFilter};
-// use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_forest::{ForestLayer, util::LevelFilter};
+use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::*;
 
 // Commit A in F, B in EF
@@ -26,14 +26,14 @@ type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 comp
 type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
-    // let env_filter = EnvFilter::builder()
-    //     .with_default_directive(LevelFilter::INFO.into())
-    //     .from_env_lossy();
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
 
-    // Registry::default()
-    //     .with(env_filter)
-    //     .with(ForestLayer::default())
-    //     .init();
+    Registry::default()
+        .with(env_filter)
+        .with(ForestLayer::default())
+        .init();
 
     // Create hash and compression functions for the Merkle tree
     let poseidon16 = Poseidon16::new_from_rng_128(&mut StdRng::seed_from_u64(0));
@@ -47,7 +47,7 @@ fn main() {
 
     let vars_diff = 3;
 
-    let num_variables_a = 24;
+    let num_variables_a = 25;
     let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
