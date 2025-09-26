@@ -1,13 +1,12 @@
 use fiat_shamir::PF;
 use fiat_shamir::*;
-use multilinear_toolkit::*;
+use multilinear_toolkit::prelude::*;
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
@@ -753,9 +752,9 @@ where
         };
 
         // Apply rest of sumcheck rounds
-        let remaining_challenges =
-            sumcheck.run_sumcheck_many_rounds(prover_state, folding_factor - 1, _pow_bits);
-
+        let remaining_challenges = info_span!("remaining initial sumcheck rounds").in_scope(|| {
+            sumcheck.run_sumcheck_many_rounds(prover_state, folding_factor - 1, _pow_bits)
+        });
         res.extend(remaining_challenges.0);
 
         (sumcheck, MultilinearPoint(res))

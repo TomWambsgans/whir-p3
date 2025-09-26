@@ -70,7 +70,7 @@ multilinear-toolkit = { git = "https://github.com/leanEthereum/multilinear-toolk
 
 
 [dev-dependencies]
-criterion = "0.6"
+criterion = "0.7.0"
 proptest = "1.0"
 
 [profile.profiling]

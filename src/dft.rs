@@ -213,14 +213,16 @@ fn dft_layer<F: Field, B: Butterfly<F>>(vec: &[F], twiddles: &[B], width: usize)
 }
 
 #[inline]
-fn dft_layer_par<F: Field, B: Butterfly<F>>(vec: &[F], twiddles: &[B], width: usize) {
-    vec.par_chunks_exact(twiddles.len() * 2 * width)
+fn dft_layer_par<F: Field, B: Butterfly<F>>(vec: &mut [F], twiddles: &[B], width: usize) {
+    vec.par_chunks_exact_mut(twiddles.len() * 2 * width)
         .for_each(|block| {
-            twiddles.par_iter().enumerate().for_each(|(i, twiddle)| {
-                let hi_chunk = slice_ref_mut(block, i * width, width);
-                let lo_chunk = slice_ref_mut(block, (i + twiddles.len()) * width, width);
-                twiddle.apply_to_rows(hi_chunk, lo_chunk);
-            });
+            let (left, right) = block.split_at_mut(twiddles.len() * width);
+            left.par_chunks_exact_mut(width)
+                .zip(right.par_chunks_exact_mut(width))
+                .zip(twiddles.par_iter())
+                .for_each(|((hi_chunk, lo_chunk), twiddle)| {
+                    twiddle.apply_to_rows(hi_chunk, lo_chunk);
+                });
         });
 }
 
@@ -359,7 +361,7 @@ fn dft_layer_par_extra_layers<F: Field, B: Butterfly<F>, M: MultiLayerButterfly<
         1 => {
             // Safe as DitButterfly is #[repr(transparent)]
             let fft_layer: &[B] = unsafe { as_base_slice(&root_table[0]) };
-            dft_layer_par(&mat.values, fft_layer, width);
+            dft_layer_par(&mut mat.values, fft_layer, width);
         }
         2 => {
             let twiddles_small: &[B] = unsafe { as_base_slice(&root_table[1]) };
@@ -557,7 +559,7 @@ impl<F: Field> Butterfly<F> for EvalsButterfly<F> {
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use multilinear_toolkit::{EvaluationsList, MultilinearPoint};
+    use multilinear_toolkit::prelude::*;
     use p3_field::TwoAdicField;
     use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
     use p3_koala_bear::KoalaBear;

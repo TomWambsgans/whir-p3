@@ -1,9 +1,7 @@
 use fiat_shamir::*;
 use fiat_shamir::{ChallengeSampler, FSChallenger, ProverState};
-use multilinear_toolkit::MultilinearPoint;
-use p3_field::*;
+use multilinear_toolkit::prelude::*;
 use p3_util::log2_strict_usize;
-use rayon::prelude::*;
 
 /// Samples a list of unique query indices from a folded evaluation domain, using transcript randomness.
 ///

@@ -1,5 +1,5 @@
 use fiat_shamir::*;
-use multilinear_toolkit::*;
+use multilinear_toolkit::prelude::*;
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;

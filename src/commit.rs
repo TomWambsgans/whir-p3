@@ -1,7 +1,7 @@
 use std::hash::{Hash, Hasher};
 
 use fiat_shamir::*;
-use multilinear_toolkit::EvaluationsList;
+use multilinear_toolkit::prelude::*;
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::{
