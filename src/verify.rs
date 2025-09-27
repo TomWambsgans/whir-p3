@@ -1,27 +1,24 @@
-use fiat_shamir::*;
+use std::{fmt::Debug, marker::PhantomData};
+
 use multilinear_toolkit::prelude::*;
 use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, marker::PhantomData};
 
 use crate::*;
 
 #[derive(Debug, Clone)]
-pub struct ParsedCommitment<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize> {
+pub struct ParsedCommitment<F: Field, EF: ExtensionField<F>> {
     pub num_variables: usize,
-    pub root: Hash<PF<EF>, PF<EF>, DIGEST_ELEMS>,
+    pub root: [PF<EF>; DIGEST_ELEMS],
     pub ood_points: Vec<EF>,
     pub ood_answers: Vec<EF>,
     pub base_field: PhantomData<F>,
 }
 
-impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
-    ParsedCommitment<F, EF, DIGEST_ELEMS>
-{
+impl<F: Field, EF: ExtensionField<F>> ParsedCommitment<F, EF> {
     pub fn parse(
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         num_variables: usize,
@@ -66,7 +63,7 @@ impl<F: Field, EF: ExtensionField<F>, const DIGEST_ELEMS: usize>
     }
 }
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
+impl<'a, F, EF, H, C> WhirConfig<F, EF, H, C>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
@@ -74,8 +71,8 @@ where
     pub fn parse_commitment(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-    ) -> ProofResult<ParsedCommitment<F, EF, DIGEST_ELEMS>> {
-        ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
+    ) -> ProofResult<ParsedCommitment<F, EF>> {
+        ParsedCommitment::<F, EF>::parse(
             verifier_state,
             self.num_variables,
             self.committment_ood_samples,
@@ -83,7 +80,7 @@ where
     }
 }
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
+impl<'a, F, EF, H, C> WhirConfig<F, EF, H, C>
 where
     F: TwoAdicField,
     EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
@@ -93,18 +90,14 @@ where
     pub fn batch_verify(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        parsed_commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        parsed_commitment_a: &ParsedCommitment<F, EF>,
         statement_a: Vec<Evaluation<EF>>,
-        parsed_commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
+        parsed_commitment_b: &ParsedCommitment<EF, EF>,
         statement_b: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         assert!(
@@ -165,7 +158,7 @@ where
             let round_params = &self.round_parameters[round_index];
 
             // Receive commitment to the folded polynomial (likely encoded at higher expansion)
-            let new_commitment = ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
+            let new_commitment = ParsedCommitment::<F, EF>::parse(
                 verifier_state,
                 round_params.num_variables,
                 round_params.ood_samples,
@@ -267,16 +260,12 @@ where
     pub fn verify(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        parsed_commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        parsed_commitment: &ParsedCommitment<F, EF>,
         statement: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         assert!(
@@ -316,7 +305,7 @@ where
             let round_params = &self.round_parameters[round_index];
 
             // Receive commitment to the folded polynomial (likely encoded at higher expansion)
-            let new_commitment = ParsedCommitment::<F, EF, DIGEST_ELEMS>::parse(
+            let new_commitment = ParsedCommitment::<F, EF>::parse(
                 verifier_state,
                 round_params.num_variables,
                 round_params.ood_samples,
@@ -444,17 +433,13 @@ where
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         params: &RoundConfig<F>,
-        commitment: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
+        commitment: &ParsedCommitment<F, EF>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Evaluation<EF>>>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let leafs_base_field = round_index == 0;
@@ -509,18 +494,14 @@ where
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         params: &RoundConfig<F>,
-        commitment_a: &ParsedCommitment<F, EF, DIGEST_ELEMS>,
-        commitment_b: &ParsedCommitment<EF, EF, DIGEST_ELEMS>,
+        commitment_a: &ParsedCommitment<F, EF>,
+        commitment_b: &ParsedCommitment<EF, EF>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Evaluation<EF>>>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let leafs_base_field = round_index == 0;
@@ -607,7 +588,7 @@ where
     fn verify_merkle_proof(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        root: &Hash<PF<EF>, PF<EF>, DIGEST_ELEMS>,
+        root: &Hash<PF<EF>, PF<EF>>,
         indices: &[usize],
         dimensions: &[Dimensions],
         leafs_base_field: bool,
@@ -615,15 +596,11 @@ where
         var_shift: usize,
     ) -> ProofResult<Vec<Vec<EF>>>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
-        let mmcs = MerkleTreeMmcs::<PF<EF>, PF<EF>, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PF<EF>, PF<EF>, H, C>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );

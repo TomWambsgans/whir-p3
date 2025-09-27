@@ -1,49 +1,71 @@
 use std::hash::{Hash, Hasher};
 
-use fiat_shamir::*;
 use multilinear_toolkit::prelude::*;
 use p3_commit::{ExtensionMmcs, Mmcs};
-use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_matrix::{
-    Matrix,
-    dense::{DenseMatrix, RowMajorMatrix},
-    extension::FlatMatrixView,
-};
+use p3_field::{ExtensionField, TwoAdicField};
+use p3_matrix::{dense::DenseMatrix, extension::FlatMatrixView};
 use p3_merkle_tree::{MerkleTree, MerkleTreeMmcs};
-use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::*;
 
-pub type RoundMerkleTree<F, EF, const DIGEST_ELEMS: usize> =
+pub type RoundMerkleTree<F, EF> =
     MerkleTree<F, F, FlatMatrixView<F, EF, DenseMatrix<EF>>, DIGEST_ELEMS>;
 
-/// Represents the commitment and evaluation data for a polynomial.
-///
-/// This structure holds all necessary components to verify a commitment,
-/// including the polynomial itself, the Merkle tree used for commitment,
-/// and out-of-domain (OOD) evaluations.
 #[derive(Debug)]
-pub struct Witness<F, EF, const DIGEST_ELEMS: usize>
+pub enum MerkleData<EF: ExtensionField<PF<EF>>> {
+    Base(RoundMerkleTree<PF<EF>, PF<EF>>),
+    Extension(RoundMerkleTree<PF<EF>, EF>),
+}
+
+impl<EF: ExtensionField<PF<EF>>> MerkleData<EF> {
+    pub fn build<H, C>(
+        merkle_hash: H,
+        merkle_compress: C,
+        matrix: DftOutput<EF>,
+    ) -> (Self, [PF<EF>; DIGEST_ELEMS])
+    where
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+    {
+        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
+            merkle_hash,
+            merkle_compress,
+        );
+        match matrix {
+            DftOutput::Base(m) => {
+                let extension_mmcs = ExtensionMmcs::<PF<EF>, PF<EF>, _>::new(mmcs.clone());
+                let (root, prover_data) = extension_mmcs.commit_matrix(m);
+                (MerkleData::Base(prover_data), root.into())
+            }
+            DftOutput::Extension(m) => {
+                let extension_mmcs = ExtensionMmcs::<PF<EF>, EF, _>::new(mmcs.clone());
+                let (root, prover_data) = extension_mmcs.commit_matrix(m);
+                (MerkleData::Extension(prover_data), root.into())
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Witness<EF>
 where
-    F: Field,
-    EF: ExtensionField<F>,
+    EF: ExtensionField<PF<EF>>,
 {
     /// Prover data of the Merkle tree.  
-    pub prover_data: RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>,
+    pub prover_data: MerkleData<EF>,
     /// Out-of-domain challenge points used for polynomial verification.  
     pub ood_points: Vec<EF>,
     /// The corresponding polynomial evaluations at the OOD challenge points.  
     pub ood_answers: Vec<EF>,
 }
 
-impl<'a, F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
+impl<'a, EF, H, C> WhirConfig<EF, H, C>
 where
-    F: Field,
-    EF: ExtensionField<F> + ExtensionField<PF<EF>>,
+    EF: ExtensionField<PF<EF>>,
     PF<EF>: TwoAdicField,
-    F: ExtensionField<PF<EF>>,
 {
     /// Commits a polynomial using a Merkle-based commitment scheme.
     ///
@@ -59,41 +81,31 @@ where
         &self,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        polynomial: &[F],
-    ) -> Witness<F, EF, DIGEST_ELEMS>
+        polynomial: &Mle<EF>,
+    ) -> Witness<EF>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
-        let evals_for_fft = prepare_evals_for_fft(
-            &polynomial,
+        // Perform DFT on the padded evaluations matrix
+        let folded_matrix = reorder_and_dft(
+            polynomial,
+            dft,
             self.folding_factor.at_round(0),
             self.starting_log_inv_rate,
         );
 
-        // Perform DFT on the padded evaluations matrix
-        let width = 1 << self.folding_factor.at_round(0);
-        let folded_matrix = dft
-            .dft_algebra_batch_by_evals(RowMajorMatrix::new(evals_for_fft, width))
-            .to_row_major_matrix();
-
-        // Commit to the Merkle tree
-        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
+        let (prover_data, root) = MerkleData::build(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
+            folded_matrix,
         );
-        let extension_mmcs_f = ExtensionMmcs::<PF<EF>, F, _>::new(mmcs.clone());
-        let (root, prover_data) = extension_mmcs_f.commit_matrix(folded_matrix);
 
-        prover_state.add_base_scalars(root.as_ref());
+        prover_state.add_base_scalars(&root);
 
         // Handle OOD (Out-Of-Domain) samples
-        let (ood_points, ood_answers) = sample_ood_points::<F, EF, _>(
+        let (ood_points, ood_answers) = sample_ood_points::<EF, _>(
             prover_state,
             self.committment_ood_samples,
             self.num_variables,

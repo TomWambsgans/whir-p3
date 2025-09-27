@@ -20,15 +20,16 @@ Credits: https://github.com/Plonky3/Plonky3 (radix_2_small_batch.rs)
 
 */
 use core::cell::RefCell;
+
 use itertools::Itertools;
-use p3_field::BasedVectorSpace;
-use p3_field::{Field, PackedField, TwoAdicField};
-use p3_matrix::Matrix;
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixViewMut};
+use p3_dft::Butterfly;
+use p3_field::{BasedVectorSpace, Field, PackedField, TwoAdicField};
+use p3_matrix::{
+    Matrix,
+    dense::{RowMajorMatrix, RowMajorMatrixViewMut},
+};
 use p3_maybe_rayon::prelude::*;
 use p3_util::{as_base_slice, log2_strict_usize};
-
-use p3_dft::Butterfly;
 
 /// The number of layers to compute in each parallelization.
 const LAYERS_PER_GROUP: usize = 3;
@@ -578,13 +579,13 @@ impl<F: Field> Butterfly<F> for EvalsButterfly<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
     use multilinear_toolkit::prelude::*;
-    use p3_field::TwoAdicField;
-    use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
+    use p3_field::{PrimeCharacteristicRing, TwoAdicField, extension::BinomialExtensionField};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{Rng, SeedableRng, rngs::StdRng};
+
+    use crate::*;
 
     type F = KoalaBear;
     type EF = BinomialExtensionField<F, 4>;

@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use fiat_shamir::*;
 use multilinear_toolkit::prelude::*;
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
@@ -26,7 +27,7 @@ type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 comp
 type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
-    // let env_filter = EnvFilter::builder()
+    // let env_filter: EnvFilter = EnvFilter::builder()
     //     .with_default_directive(LevelFilter::INFO.into())
     //     .from_env_lossy();
 
@@ -47,7 +48,7 @@ fn main() {
 
     let vars_diff = 3;
 
-    let num_variables_a = 24;
+    let num_variables_a = 25;
     let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
@@ -66,13 +67,7 @@ fn main() {
         rs_domain_initial_reduction_factor: 5,
     };
 
-    let params_b = second_batched_whir_config_builder::<BaseFieldB, EF, _, _, _>(
-        params_a.clone(),
-        num_variables_a,
-        num_variables_b,
-    );
     let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
-    let params_b = WhirConfig::new(params_b, num_variables_b);
 
     // println!("Using parameters:\n{}", params.to_string());
 
@@ -139,20 +134,16 @@ fn main() {
     let commit_time_a = time.elapsed();
 
     let time = Instant::now();
-    let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
     let commit_time_b = time.elapsed();
 
     // Generate a proof for the given statement and witness
     let time = Instant::now();
-    params_a.batch_prove(
+    params_a.prove(
         &dft,
         &mut prover_state,
         statement_a.clone(),
         witness_a,
         &polynomial_a,
-        statement_b.clone(),
-        witness_b,
-        &polynomial_b,
     );
 
     let opening_time = time.elapsed();
@@ -161,22 +152,11 @@ fn main() {
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
-    let parsed_commitment_a = params_a
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
-    let parsed_commitment_b = params_b
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
+    let parsed_commitment_a = params_a.parse_commitment(&mut verifier_state).unwrap();
 
-        let verif_time = Instant::now();
+    let verif_time = Instant::now();
     params_a
-        .batch_verify(
-            &mut verifier_state,
-            &parsed_commitment_a,
-            statement_a,
-            &parsed_commitment_b,
-            statement_b,
-        )
+        .verify(&mut verifier_state, &parsed_commitment_a, statement_a)
         .unwrap();
     let verify_time = verif_time.elapsed();
 

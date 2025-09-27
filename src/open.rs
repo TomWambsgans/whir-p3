@@ -1,74 +1,31 @@
-use fiat_shamir::PF;
-use fiat_shamir::*;
 use multilinear_toolkit::prelude::*;
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CryptographicHasher, PseudoCompressionFunction};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use crate::{config::WhirConfig, *};
 
-pub type Proof<W, const DIGEST_ELEMS: usize> = Vec<Vec<[W; DIGEST_ELEMS]>>;
-pub type Leafs<F> = Vec<Vec<F>>;
-
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
+impl<EF, H, C> WhirConfig<EF, H, C>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    F: ExtensionField<PF<EF>>,
     EF: ExtensionField<PF<EF>>,
+    PF<EF>: TwoAdicField,
 {
-    /// Validates that the total number of variables expected by the prover configuration
-    /// matches the number implied by the folding schedule and the final rounds.
-    ///
-    /// This ensures that the recursive folding in the sumcheck protocol terminates
-    /// precisely at the expected number of final variables.
-    ///
-    /// # Returns
-    /// `true` if the parameter configuration is consistent, `false` otherwise.
     fn validate_parameters(&self) -> bool {
         self.num_variables
             == self.folding_factor.total_number(self.n_rounds()) + self.final_sumcheck_rounds
     }
 
-    /// Validates that the public statement is compatible with the configured number of variables.
-    ///
-    /// Ensures the following:
-    /// - The number of variables in the statement matches the prover's expectations
-    /// - If no initial statement is used, the statement must be empty
-    ///
-    /// # Parameters
-    /// - `statement`: The public constraints that the prover will use
-    ///
-    /// # Returns
-    /// `true` if the statement structure is valid for this protocol instance.
     fn validate_statement(&self, statement: &[Evaluation<EF>]) -> bool {
         statement
             .iter()
             .all(|e| e.num_variables() == self.num_variables)
     }
 
-    /// Validates that the witness satisfies the structural requirements of the WHIR prover.
-    ///
-    /// Checks the following conditions:
-    /// - The number of OOD (out-of-domain) points equals the number of OOD answers
-    /// - If no initial statement is used, the OOD data must be empty
-    /// - The multilinear witness polynomial must match the expected number of variables
-    ///
-    /// # Parameters
-    /// - `witness`: The private witness to be verified for structural consistency
-    ///
-    /// # Returns
-    /// `true` if the witness structure matches expectations.
-    ///
-    /// # Panics
-    /// - Panics if OOD lengths are inconsistent
-    /// - Panics if OOD data is non-empty despite `initial_statement = false`
-    fn validate_witness(&self, witness: &Witness<F, EF, DIGEST_ELEMS>, polynomial: &[F]) -> bool {
+    fn validate_witness(&self, witness: &Witness<EF>, polynomial: &[F]) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
         polynomial.num_variables() == self.num_variables
     }
@@ -79,18 +36,13 @@ where
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement: Vec<Evaluation<EF>>,
-        witness: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial: &[F],
+        witness: Witness<EF>,
+        polynomial: &Mle<EF>,
     ) -> MultilinearPoint<EF>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
-        PF<EF>: TwoAdicField,
     {
         // Validate parameters
         assert!(
@@ -131,19 +83,15 @@ where
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
-        witness_a: Witness<F, EF, DIGEST_ELEMS>,
+        witness_a: Witness<EF>,
         polynomial_a: &[F],
         statement_b: Vec<Evaluation<EF>>,
-        witness_b: Witness<EF, EF, DIGEST_ELEMS>,
+        witness_b: Witness<EF>,
         polynomial_b: &[EF],
     ) -> MultilinearPoint<EF>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<EF>: TwoAdicField,
     {
@@ -175,17 +123,12 @@ where
         round_index: usize,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
+        round_state: &mut RoundState<F, EF>,
     ) -> ProofResult<()>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
-        PF<EF>: TwoAdicField,
     {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables = self.num_variables - self.folding_factor.total_number(round_index);
@@ -225,7 +168,7 @@ where
             })
         });
 
-        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
@@ -325,7 +268,8 @@ where
                             round_state.folding_randomness[vars_a - vars_b + 1..].to_vec();
                         let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
                         let last_fold_rand_a = round_state.folding_randomness[0];
-                        let last_fold_rand_b = round_state.folding_randomness[..vars_a - vars_b + 1]
+                        let last_fold_rand_b = round_state.folding_randomness
+                            [..vars_a - vars_b + 1]
                             .iter()
                             .map(|&x| EF::ONE - x)
                             .product::<EF>();
@@ -447,15 +391,11 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        round_state: &mut RoundState<F, EF, DIGEST_ELEMS>,
+        round_state: &mut RoundState<F, EF>,
     ) -> ProofResult<()>
     where
-        H: CryptographicHasher<PF<EF>, [PF<EF>; DIGEST_ELEMS]>
-            + CryptographicHasher<PFPacking<EF>, [PFPacking<EF>; DIGEST_ELEMS]>
-            + Sync,
-        C: PseudoCompressionFunction<[PF<EF>; DIGEST_ELEMS], 2>
-            + PseudoCompressionFunction<[PFPacking<EF>; DIGEST_ELEMS], 2>
-            + Sync,
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Directly send coefficients of the polynomial to the verifier.
@@ -472,7 +412,7 @@ where
         );
 
         // Every query requires opening these many in the previous Merkle tree
-        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
+        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
@@ -561,7 +501,7 @@ where
     fn compute_stir_queries(
         &self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        round_state: &RoundState<F, EF, DIGEST_ELEMS>,
+        round_state: &RoundState<F, EF>,
         num_variables: usize,
         round_params: &RoundConfig<F>,
         ood_points: &[EF],
@@ -699,16 +639,14 @@ where
         challenges
     }
 
-    pub(crate) fn run_initial_sumcheck_rounds<F: Field>(
-        evals: &[F],
+    pub(crate) fn run_initial_sumcheck_rounds(
+        evals: &Mle<EF>,
         statement: &[Evaluation<EF>],
         combination_randomness: EF,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         _pow_bits: usize, // TODO
     ) -> (Self, MultilinearPoint<EF>)
-    where
-        EF: ExtensionField<F>,
     {
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
@@ -751,68 +689,42 @@ where
     }
 }
 
-/// Holds all per-round prover state required during the execution of the WHIR protocol.
-///
-/// Each round involves:
-/// - A domain extension and folding step,
-/// - Merkle commitments and openings,
-/// - A sumcheck polynomial generation and folding randomness sampling,
-/// - Bookkeeping of constraints and evaluation points.
-///
-/// The `RoundState` evolves with each round and captures all intermediate data required
-/// to continue proving or to verify challenges from the verifier.
 #[derive(Debug)]
-pub(crate) struct RoundState<F, EF, const DIGEST_ELEMS: usize>
+pub(crate) struct RoundState<EF>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
+    EF: ExtensionField<PF<EF>>,
 {
     pub(crate) domain_size: usize,
 
-    pub(crate) next_domain_gen: F,
+    pub(crate) next_domain_gen: PF<EF>,
 
-    /// The sumcheck prover responsible for managing constraint accumulation and sumcheck rounds.
-    /// Initialized in the first round (if applicable), and reused/updated in each subsequent round.
     pub(crate) sumcheck_prover: SumcheckSingle<EF>,
 
-    /// The sampled folding randomness for this round, used to collapse a subset of variables.
-    /// Length equals the folding factor at this round.
     pub(crate) folding_randomness: MultilinearPoint<EF>,
 
-    /// Merkle commitment prover data for the **base field** polynomial from the first round.
-    /// This is used to open values at queried locations.
-    pub(crate) commitment_merkle_prover_data_a: RoundMerkleTree<PF<EF>, F, DIGEST_ELEMS>,
+    pub(crate) commitment_merkle_prover_data_a: MerkleData<EF>,
 
-    pub(crate) commitment_merkle_prover_data_b: Option<RoundMerkleTree<PF<EF>, EF, DIGEST_ELEMS>>,
+    pub(crate) commitment_merkle_prover_data_b: Option<MerkleData<EF>>,
 
-    /// Merkle commitment prover data for the **extension field** polynomials (folded rounds).
-    /// Present only after the first round.
-    pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<EF>, EF, DIGEST_ELEMS>>,
+    pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<EF>, EF>>,
 
-    /// Flat vector of challenge values used across all rounds.
-    /// Populated progressively as folding randomness is sampled.
-    /// The `i`-th index corresponds to variable `X_{n - 1 - i}`.
     pub(crate) randomness_vec: Vec<EF>,
 
-    /// The accumulated set of linear equality constraints for this round.
-    /// Used in computing the weighted sum for the sumcheck polynomial.
     pub(crate) statement: Vec<Evaluation<EF>>,
 }
 
 #[allow(clippy::mismatching_type_param_order)]
-impl<F, EF, const DIGEST_ELEMS: usize> RoundState<F, EF, DIGEST_ELEMS>
+impl<EF> RoundState<EF>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
-    F: ExtensionField<PF<EF>>,
     EF: ExtensionField<PF<EF>>,
+    PF<EF>: TwoAdicField,
 {
     pub(crate) fn initialize_first_round_state<MyChallenger, C>(
-        prover: &WhirConfig<F, EF, MyChallenger, C, DIGEST_ELEMS>,
+        prover: &WhirConfig<EF, MyChallenger, C>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         mut statement: Vec<Evaluation<EF>>,
-        witness: Witness<F, EF, DIGEST_ELEMS>,
-        polynomial: &[F],
+        witness: Witness<EF>,
+        polynomial: &Mle<EF>,
     ) -> ProofResult<Self> {
         // Convert witness ood_points into constraints
         let new_constraints = witness
@@ -860,13 +772,13 @@ where
     }
 
     pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
-        prover: &WhirConfig<F, EF, MyChallenger, C, DIGEST_ELEMS>,
+        prover: &WhirConfig<EF, MyChallenger, C>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
-        witness_a: Witness<F, EF, DIGEST_ELEMS>,
+        witness_a: Witness<EF>,
         polynomial_a: &[F],
         statement_b: Vec<Evaluation<EF>>,
-        witness_b: Witness<EF, EF, DIGEST_ELEMS>,
+        witness_b: Witness<EF>,
         polynomial_b: &[EF],
     ) -> ProofResult<Self> {
         let n_vars_a = statement_a[0].num_variables();
@@ -985,14 +897,12 @@ where
     (combined_evals, combined_sum)
 }
 
-#[instrument(skip_all, fields(num_variables = evals.num_variables()))]
-pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
-    evals: &[F],
+#[instrument(skip_all)]
+pub(crate) fn compute_sumcheck_polynomial<EF: ExtensionField<PF<EF>>>(
+    evals: &Mle<EF>,
     weights: &Vec<EF>,
     sum: EF,
 ) -> DensePolynomial<EF> {
-    assert!(evals.len().is_power_of_two());
-
     let (c0, c2) = (0..evals.len() / 2)
         .into_par_iter()
         .map(|i| {
@@ -1015,9 +925,9 @@ pub(crate) fn compute_sumcheck_polynomial<F: Field, EF: ExtensionField<F>>(
     let eval_2 = eval_1 + c1 + c2 + c2.double();
 
     DensePolynomial::lagrange_interpolation(&[
-        (F::ZERO, eval_0),
-        (F::ONE, eval_1),
-        (F::TWO, eval_2),
+        (PF::<EF>::ZERO, eval_0),
+        (PF::<EF>::ONE, eval_1),
+        (PF::<EF>::TWO, eval_2),
     ])
     .expect("Failed to interpolate sumcheck polynomial")
 }
