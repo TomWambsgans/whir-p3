@@ -86,10 +86,6 @@ fn main() {
         for i in 0..initial_booleans {
             point[i] = EF::from_usize(rng.random_range(0..2));
         }
-        let final_booleans = rng.random_range(0..num_variables / 4);
-        for i in (num_variables - final_booleans)..num_variables {
-            point[i] = EF::from_usize(rng.random_range(0..2));
-        }
         MultilinearPoint(point)
     };
 

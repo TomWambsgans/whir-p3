@@ -146,7 +146,7 @@ where
         let inv_rate = new_domain_size >> num_variables;
         let folded_matrix = info_span!("FFT").in_scope(|| {
             reorder_and_dft(
-                &MleRef::ExtensionPacked(folded_evaluations),
+                &folded_evaluations.by_ref(),
                 dft,
                 folding_factor_next,
                 log2_strict_usize(inv_rate),
@@ -166,9 +166,7 @@ where
             prover_state,
             round_params.ood_samples,
             num_variables,
-            |point| {
-                info_span!("ood evaluation").in_scope(|| eval_packed(folded_evaluations, point))
-            },
+            |point| info_span!("ood evaluation").in_scope(|| folded_evaluations.evaluate(point)),
         );
 
         prover_state.pow_grinding(round_params.pow_bits);
@@ -425,7 +423,13 @@ where
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Directly send coefficients of the polynomial to the verifier.
-        prover_state.add_extension_scalars(&unpack_extension(&round_state.sumcheck_prover.evals));
+        prover_state.add_extension_scalars(&unpack_extension(
+            &round_state
+                .sumcheck_prover
+                .evals
+                .as_extension_packed()
+                .unwrap(),
+        ));
 
         prover_state.pow_grinding(self.final_pow_bits);
 
@@ -539,9 +543,9 @@ where
 #[derive(Debug, Clone)]
 pub struct SumcheckSingle<EF: ExtensionField<PF<EF>>> {
     /// Evaluations of the polynomial `p(X)`.
-    pub(crate) evals: Vec<EFPacking<EF>>,
+    pub(crate) evals: MleOwned<EF>,
     /// Evaluations of the equality polynomial used for enforcing constraints.
-    pub(crate) weights: Vec<EFPacking<EF>>,
+    pub(crate) weights: MleOwned<EF>,
     /// Accumulated sum incorporating equality constraints.
     pub(crate) sum: EF,
 }
@@ -563,7 +567,11 @@ where
             .iter()
             .zip(combination_randomness.iter())
             .for_each(|(point, &rand)| {
-                compute_eval_eq_packed::<_, true>(point, &mut self.weights, rand);
+                compute_eval_eq_packed::<_, true>(
+                    point,
+                    &mut self.weights.as_extension_packed_mut().unwrap(),
+                    rand,
+                );
             });
 
         self.sum += combination_randomness
@@ -588,7 +596,11 @@ where
             .iter()
             .zip(combination_randomness.iter())
             .for_each(|(point, &rand)| {
-                compute_eval_eq_base_packed::<_, _, true>(point, &mut self.weights, rand);
+                compute_eval_eq_base_packed::<_, _, true>(
+                    point,
+                    &mut self.weights.as_extension_packed_mut().unwrap(),
+                    rand,
+                );
             });
 
         // Accumulate the weighted sum (cheap, done sequentially)
@@ -605,10 +617,10 @@ where
         folding_factor: usize,
         _pow_bits: usize, // TODO pow grinding
     ) -> MultilinearPoint<EF> {
-        let num_vars_start = log2_strict_usize(self.evals.len());
+        let num_vars_start = self.evals.by_ref().n_vars();
         let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
             1,
-            MleGroupOwned::ExtensionPacked(vec![
+            MleGroupOwned::merge(vec![
                 std::mem::take(&mut self.evals),
                 std::mem::take(&mut self.weights),
             ]),
@@ -624,12 +636,10 @@ where
         );
 
         self.sum = new_sum;
-        let mut folded = folds.as_owned().unwrap();
-        self.evals = std::mem::take(&mut folded.as_extension_packed_mut().unwrap()[0]);
-        self.weights = std::mem::take(&mut folded.as_extension_packed_mut().unwrap()[1]);
+        [self.evals, self.weights] = folds.as_owned().unwrap().split().try_into().unwrap();
 
         assert_eq!(
-            log2_strict_usize(self.evals.len()),
+            self.evals.by_ref().n_vars(),
             num_vars_start - folding_factor
         );
 
@@ -692,8 +702,8 @@ where
         res.push(r);
 
         let mut sumcheck = Self {
-            evals: compressed_evals,
-            weights,
+            evals: MleOwned::ExtensionPacked(compressed_evals),
+            weights: MleOwned::ExtensionPacked(weights),
             sum,
         };
 

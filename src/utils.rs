@@ -155,7 +155,7 @@ fn prepare_evals_for_fft_packed_extension<EF: ExtensionField<PF<EF>>>(
     log_inv_rate: usize,
 ) -> Vec<EF> {
     let log_packing = packing_log_width::<EF>();
-    assert!(evals.len() << log_packing % (1 << folding_factor) == 0);
+    assert!((evals.len() << log_packing) % (1 << folding_factor) == 0);
     let n_blocks = 1 << folding_factor;
     let full_len = evals.len() << (log_inv_rate + log_packing);
     let block_size = full_len / n_blocks;
