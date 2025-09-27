@@ -2,7 +2,6 @@ use std::{f64::consts::LOG2_10, fmt::Display, str::FromStr};
 
 use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use serde::Serialize;
 use thiserror::Error;
 
 pub const DEFAULT_MAX_POW: usize = 17;
@@ -599,7 +598,7 @@ where
 }
 
 /// Security assumptions determines which proximity parameters and conjectures are assumed by the error computation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityAssumption {
     /// Unique decoding assumes that the distance of each oracle is within the UDR of the code.
     /// We refer to this configuration as UD for short.

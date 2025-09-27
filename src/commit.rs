@@ -5,7 +5,6 @@ use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{dense::DenseMatrix, extension::FlatMatrixView};
 use p3_merkle_tree::{MerkleTree, MerkleTreeMmcs};
-use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::*;
@@ -29,7 +28,6 @@ impl<EF: ExtensionField<PF<EF>>> MerkleData<EF> {
     where
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
             merkle_hash,
@@ -59,7 +57,6 @@ impl<EF: ExtensionField<PF<EF>>> MerkleData<EF> {
     where
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
             merkle_hash,
@@ -122,8 +119,7 @@ where
     ) -> Witness<EF>
     where
         H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+        C: MerkleCompress<EF>
     {
         // Perform DFT on the padded evaluations matrix
         let folded_matrix = reorder_and_dft(

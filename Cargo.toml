@@ -36,7 +36,6 @@ suboptimal_flops = "allow"
 cast_sign_loss = "allow"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
 rayon = { version = "1.0" }
 p3-field = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "lean-multisig" }
 p3-koala-bear = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "lean-multisig" }

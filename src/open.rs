@@ -1,7 +1,6 @@
 use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_util::log2_strict_usize;
-use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 use crate::{config::WhirConfig, *};
@@ -38,7 +37,6 @@ where
     where
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Validate parameters
         assert!(
@@ -86,7 +84,6 @@ where
     where
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
         PF<EF>: TwoAdicField,
     {
         // (1 - X).PolB + X.PolA
@@ -120,7 +117,6 @@ where
     where
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables = self.num_variables - self.folding_factor.total_number(round_index);
@@ -414,7 +410,6 @@ where
     where
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(&unpack_extension(

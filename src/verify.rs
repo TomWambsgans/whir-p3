@@ -5,7 +5,6 @@ use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
 use p3_merkle_tree::MerkleTreeMmcs;
-use serde::{Deserialize, Serialize};
 
 use crate::*;
 
@@ -101,7 +100,6 @@ where
         F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         assert!(
             statement_a
@@ -271,7 +269,6 @@ where
         F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         assert!(
             statement
@@ -447,7 +444,6 @@ where
         F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let leafs_base_field = round_index == 0;
 
@@ -511,7 +507,6 @@ where
         F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let leafs_base_field = round_index == 0;
 
@@ -609,7 +604,6 @@ where
         F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
-        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         let mmcs = MerkleTreeMmcs::<PF<EF>, PF<EF>, H, C, DIGEST_ELEMS>::new(
             self.merkle_hash.clone(),

@@ -1215,7 +1215,6 @@ dependencies = [
  "proptest",
  "rand",
  "rayon",
- "serde",
  "thiserror",
  "tracing",
  "tracing-forest",
