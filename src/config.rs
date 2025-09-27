@@ -5,7 +5,7 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use serde::Serialize;
 use thiserror::Error;
 
-pub const DEFAULT_MAX_POW: usize = 17;
+pub const DEFAULT_MAX_POW: usize = 16;
 
 /// Errors that can occur when validating a folding factor.
 #[derive(Debug, Error, PartialEq, Eq)]

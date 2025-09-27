@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use multilinear_toolkit::prelude::*;
 use p3_challenger::DuplexChallenger;
-use p3_field::{PrimeCharacteristicRing, PrimeField64};
-use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
+use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing, PrimeField64};
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 // use tracing_forest::{ForestLayer, util::LevelFilter};
@@ -14,7 +14,7 @@ use whir_p3::*;
 // TODO there is a big overhead embedding overhead in the sumcheck
 
 type F = KoalaBear;
-type EF = QuinticExtensionFieldKB;
+type EF = BinomialExtensionField<KoalaBear, 4>;
 
 type EFPrimeSubfield = <EF as PrimeCharacteristicRing>::PrimeSubfield;
 
@@ -45,30 +45,25 @@ fn main() {
     type BaseFieldA = F;
     type BaseFieldB = EF;
 
-    let vars_diff = 3;
 
     let num_variables_a = 25;
-    let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
-    let num_coeffs_b = 1 << num_variables_b;
 
     // Construct WHIR protocol parameters
     let params_a = WhirConfigBuilder {
-        security_level: 128,
+        security_level: 90,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
-        folding_factor: FoldingFactor::new(7, 4),
+        folding_factor: FoldingFactor::new(5, 5),
         merkle_hash: merkle_hash.clone(),
         merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
-        rs_domain_initial_reduction_factor: 5,
+        rs_domain_initial_reduction_factor: 3,
     };
-    let params_b =
-        second_batched_whir_config_builder(params_a.clone(), num_variables_a, num_variables_b);
+    
     let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
-    let params_b = WhirConfig::new(params_b, num_variables_b);
 
     // println!("Using parameters:\n{}", params.to_string());
 
@@ -76,43 +71,20 @@ fn main() {
     let polynomial_a = (0..num_coeffs_a)
         .map(|_| rng.random())
         .collect::<Vec<BaseFieldA>>();
-    let polynomial_b = (0..num_coeffs_b)
-        .map(|_| rng.random())
-        .collect::<Vec<BaseFieldB>>();
 
-    let random_sparse_point = |rng: &mut StdRng, num_variables: usize| {
-        let mut point = (0..num_variables)
-            .map(|_| rng.random())
-            .collect::<Vec<EF>>();
-        let initial_booleans = rng.random_range(0..num_variables / 4);
-        for i in 0..initial_booleans {
-            point[i] = EF::from_usize(rng.random_range(0..2));
-        }
-        MultilinearPoint(point)
-    };
 
     // Sample `num_points` random multilinear points in the Boolean hypercube
-    let mut points_a = (0..7)
-        .map(|_| random_sparse_point(&mut rng, num_variables_a))
-        .collect::<Vec<_>>();
-    points_a.push(MultilinearPoint(vec![EF::ONE; num_variables_a]));
-    points_a.push(MultilinearPoint(vec![EF::ZERO; num_variables_a]));
-    let points_b = (0..9)
-        .map(|_| random_sparse_point(&mut rng, num_variables_b))
-        .collect::<Vec<_>>();
+    let points_a: Vec<MultilinearPoint<EF>> = (0..1)
+        .map(|_| MultilinearPoint((0..num_variables_a).map(|_| rng.random()).collect()))
+        .collect();
 
     // Construct a new statement with the correct number of variables
     let mut statement_a = Vec::new();
-    let mut statement_b = Vec::new();
 
     // Add constraints for each sampled point (equality constraints)
     for point_a in &points_a {
         let eval = polynomial_a.evaluate(point_a);
         statement_a.push(Evaluation::new(point_a.clone(), eval));
-    }
-    for point_b in &points_b {
-        let eval = polynomial_b.evaluate(point_b);
-        statement_b.push(Evaluation::new(point_b.clone(), eval));
     }
 
     // Define the Fiat-Shamir domain separator pattern for committing and proving
@@ -127,26 +99,25 @@ fn main() {
     let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
     let polynomial_a = MleOwned::Base(polynomial_a);
-    let polynomial_b = MleOwned::ExtensionPacked(pack_extension(&polynomial_b));
     let time = Instant::now();
     let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
 
-    let time = Instant::now();
-    let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
-    let commit_time_b = time.elapsed();
+    // let time = Instant::now();
+    // let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
+    // let commit_time_b = time.elapsed();
 
     // Generate a proof for the given statement and witness
     let time = Instant::now();
-    params_a.batch_prove(
+    params_a.prove(
         &dft,
         &mut prover_state,
         statement_a.clone(),
         witness_a,
         &polynomial_a.by_ref(),
-        statement_b.clone(),
-        witness_b,
-        &polynomial_b.by_ref(),
+        // statement_b.clone(),
+        // witness_b,
+        // &polynomial_b.by_ref(),
     );
 
     let opening_time = time.elapsed();
@@ -154,29 +125,28 @@ fn main() {
     // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
-    // Parse the commitment
-    let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
-    let parsed_commitment_b = params_b
-        .parse_commitment::<EF>(&mut verifier_state)
-        .unwrap();
+    // // Parse the commitment
+     let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
+    // let parsed_commitment_b = params_b
+    //     .parse_commitment::<EF>(&mut verifier_state)
+    //     .unwrap();
 
     let verif_time = Instant::now();
     params_a
-        .batch_verify(
+        .verify(
             &mut verifier_state,
             &parsed_commitment_a,
             statement_a,
-            &parsed_commitment_b,
-            statement_b,
+            // &parsed_commitment_b,
+            // statement_b,
         )
         .unwrap();
     let verify_time = verif_time.elapsed();
 
     println!(
-        "\nProving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",
-        commit_time_a.as_millis() + commit_time_b.as_millis() + opening_time.as_millis(),
+        "\nProving time: {} ms (commit A: {} ms,  opening: {} ms)",
+        commit_time_a.as_millis()+ opening_time.as_millis(),
         commit_time_a.as_millis(),
-        commit_time_b.as_millis(),
         opening_time.as_millis()
     );
     let proof_size =
