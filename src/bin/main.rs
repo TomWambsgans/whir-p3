@@ -65,8 +65,10 @@ fn main() {
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,
     };
-
+    let params_b =
+        second_batched_whir_config_builder(params_a.clone(), num_variables_a, num_variables_b);
     let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
+    let params_b = WhirConfig::new(params_b, num_variables_b);
 
     // println!("Using parameters:\n{}", params.to_string());
 
@@ -125,21 +127,26 @@ fn main() {
     let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
     let polynomial_a = MleOwned::Base(polynomial_a);
+    let polynomial_b = MleOwned::ExtensionPacked(pack_extension(&polynomial_b));
     let time = Instant::now();
     let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
 
     let time = Instant::now();
+    let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
     let commit_time_b = time.elapsed();
 
     // Generate a proof for the given statement and witness
     let time = Instant::now();
-    params_a.prove(
+    params_a.batch_prove(
         &dft,
         &mut prover_state,
         statement_a.clone(),
         witness_a,
         &polynomial_a.by_ref(),
+        statement_b.clone(),
+        witness_b,
+        &polynomial_b.by_ref(),
     );
 
     let opening_time = time.elapsed();
@@ -149,10 +156,19 @@ fn main() {
 
     // Parse the commitment
     let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
+    let parsed_commitment_b = params_b
+        .parse_commitment::<EF>(&mut verifier_state)
+        .unwrap();
 
     let verif_time = Instant::now();
     params_a
-        .verify(&mut verifier_state, &parsed_commitment_a, statement_a)
+        .batch_verify(
+            &mut verifier_state,
+            &parsed_commitment_a,
+            statement_a,
+            &parsed_commitment_b,
+            statement_b,
+        )
         .unwrap();
     let verify_time = verif_time.elapsed();
 

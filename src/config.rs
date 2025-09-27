@@ -171,14 +171,12 @@ pub struct WhirConfig<EF: Field, Hash, C> {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn second_batched_whir_config_builder<FB, EF, H, C>(
+pub fn second_batched_whir_config_builder<H, C>(
     params_a: WhirConfigBuilder<H, C>,
     num_variables_a: usize,
     num_variables_b: usize,
 ) -> WhirConfigBuilder<H, C>
 where
-    FB: TwoAdicField,
-    EF: ExtensionField<FB> + TwoAdicField,
     H: Clone,
     C: Clone,
 {

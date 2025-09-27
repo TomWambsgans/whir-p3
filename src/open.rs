@@ -836,7 +836,8 @@ where
             statement.push(constraint);
         }
 
-        let mut polynomial = EFPacking::<EF>::zero_vec(polynomial_a.n_vars() * 2);
+        let mut polynomial =
+            EFPacking::<EF>::zero_vec(polynomial_a.unpacked_len() * 2 / packing_width::<EF>());
 
         match polynomial_b {
             MleRef::ExtensionPacked(polynomial_b) => {
@@ -854,7 +855,7 @@ where
                     .collect::<Vec<_>>();
                 parallel_clone(
                     &pack_extension(&embedded),
-                    &mut polynomial[polynomial_a.len()..],
+                    &mut polynomial[polynomial_a.len() / packing_width::<EF>()..],
                 );
             }
             _ => unimplemented!(),
