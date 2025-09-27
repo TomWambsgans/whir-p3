@@ -19,7 +19,7 @@ To avoid dealing with the coeffs, we can directly perform the DFT on the evals, 
 Credits: https://github.com/Plonky3/Plonky3 (radix_2_small_batch.rs)
 
 */
-use core::cell::RefCell;
+use std::sync::RwLock;
 
 use itertools::Itertools;
 use p3_dft::Butterfly;
@@ -34,18 +34,23 @@ use p3_util::{as_base_slice, log2_strict_usize};
 /// The number of layers to compute in each parallelization.
 const LAYERS_PER_GROUP: usize = 3;
 
-#[derive(Default, Clone, Debug)]
-pub struct EvalsDft<F> {
-    twiddles: RefCell<Vec<Vec<F>>>,
+#[derive(Default, Debug)]
+pub(crate) struct EvalsDft<F> {
+    twiddles: RwLock<Vec<Vec<F>>>,
 }
 
 impl<F: TwoAdicField> EvalsDft<F> {
-    pub fn new(n: usize) -> Self {
+    pub(crate) fn new(n: usize) -> Self {
         let res = Self {
-            twiddles: RefCell::default(),
+            twiddles: RwLock::default(),
         };
         res.update_twiddles(n);
         res
+    }
+
+    pub(crate) fn max_n_twiddles(&self) -> usize {
+        let guard = self.twiddles.read().unwrap();
+        1 << guard.len()
     }
 
     fn roots_of_unity_table(&self, n: usize) -> Vec<Vec<F>> {
@@ -60,12 +65,13 @@ impl<F: TwoAdicField> EvalsDft<F> {
             .collect()
     }
 
-    fn update_twiddles(&self, fft_len: usize) {
+    pub(crate) fn update_twiddles(&self, fft_len: usize) {
         // TODO: This recomputes the entire table from scratch if we
         // need it to be larger, which is wasteful.
-        let curr_max_fft_len = 1 << self.twiddles.borrow().len();
+        let mut guard = self.twiddles.write().unwrap();
+        let curr_max_fft_len = 1 << guard.len();
         if fft_len > curr_max_fft_len {
-            self.twiddles.replace(self.roots_of_unity_table(fft_len));
+            *guard = self.roots_of_unity_table(fft_len);
         }
     }
 }
@@ -74,13 +80,13 @@ impl<F> EvalsDft<F>
 where
     F: TwoAdicField,
 {
-    pub fn dft_batch_by_evals(&self, mut mat: RowMajorMatrix<F>) -> RowMajorMatrix<F> {
+    pub(crate) fn dft_batch_by_evals(&self, mut mat: RowMajorMatrix<F>) -> RowMajorMatrix<F> {
         let h = mat.height();
         let w = mat.width();
         let log_h = log2_strict_usize(h);
 
         self.update_twiddles(h);
-        let root_table = self.twiddles.borrow();
+        let root_table = self.twiddles.read().unwrap();
         let len = root_table.len();
         let root_table = &root_table[len - log_h..];
 
@@ -143,7 +149,7 @@ where
         mat
     }
 
-    pub fn dft_algebra_batch_by_evals<V: BasedVectorSpace<F> + Clone + Send + Sync>(
+    pub(crate) fn dft_algebra_batch_by_evals<V: BasedVectorSpace<F> + Clone + Send + Sync>(
         &self,
         mat: RowMajorMatrix<V>,
     ) -> RowMajorMatrix<V> {

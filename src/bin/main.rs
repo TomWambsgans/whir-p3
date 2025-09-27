@@ -35,7 +35,6 @@ fn main() {
     //     .with(ForestLayer::default())
     //     .init();
 
-    // Create hash and compression functions for the Merkle tree
     let poseidon16 = Poseidon16::new_from_rng_128(&mut StdRng::seed_from_u64(0));
     let poseidon24 = Poseidon24::new_from_rng_128(&mut StdRng::seed_from_u64(0));
 
@@ -124,22 +123,32 @@ fn main() {
 
     // Commit to the polynomial and produce a witness
 
-    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
+    precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
     let polynomial_a = MleOwned::Base(polynomial_a);
     let polynomial_b = MleOwned::ExtensionPacked(pack_extension(&polynomial_b));
     let time = Instant::now();
-    let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
+    let witness_a = params_a.commit(&mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
 
     let time = Instant::now();
-    let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
+    let witness_b = params_b.commit(&mut prover_state, &polynomial_b);
     let commit_time_b = time.elapsed();
 
-    // Generate a proof for the given statement and witness
+    let witness_a_clone = witness_a.clone();
+    let time = Instant::now();
+    params_a.prove(
+        &mut prover_state,
+        statement_a.clone(),
+        witness_a_clone,
+        &polynomial_a.by_ref(),
+    );
+    let opening_time_single = time.elapsed();
+    let proof_size_single =
+        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
+
     let time = Instant::now();
     params_a.batch_prove(
-        &dft,
         &mut prover_state,
         statement_a.clone(),
         witness_a,
@@ -148,8 +157,10 @@ fn main() {
         witness_b,
         &polynomial_b.by_ref(),
     );
-
-    let opening_time = time.elapsed();
+    let opening_time_batch = time.elapsed();
+    let proof_size_batch =
+        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0
+            - proof_size_single;
 
     // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
@@ -158,6 +169,14 @@ fn main() {
     let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
     let parsed_commitment_b = params_b
         .parse_commitment::<EF>(&mut verifier_state)
+        .unwrap();
+
+    params_a
+        .verify::<F>(
+            &mut verifier_state,
+            &parsed_commitment_a,
+            statement_a.clone(),
+        )
         .unwrap();
 
     let verif_time = Instant::now();
@@ -173,14 +192,24 @@ fn main() {
     let verify_time = verif_time.elapsed();
 
     println!(
-        "\nProving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",
-        commit_time_a.as_millis() + commit_time_b.as_millis() + opening_time.as_millis(),
+        "\nSingle proving time: {} ms (commit: {} ms, opening: {} ms)",
+        commit_time_a.as_millis() + opening_time_single.as_millis(),
+        commit_time_a.as_millis(),
+        opening_time_single.as_millis()
+    );
+
+    println!(
+        "\nBatch proving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",
+        commit_time_a.as_millis() + commit_time_b.as_millis() + opening_time_batch.as_millis(),
         commit_time_a.as_millis(),
         commit_time_b.as_millis(),
-        opening_time.as_millis()
+        opening_time_batch.as_millis()
     );
-    let proof_size =
-        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
-    println!("proof size: {:.2} KiB", proof_size / 1024.0);
-    println!("Verification time: {} μs", verify_time.as_micros());
+
+    println!("proof size single: {:.2} KiB", proof_size_single / 1024.0);
+    println!("proof size batch: {:.2} KiB", proof_size_batch / 1024.0);
+    println!(
+        "Verification time: {:.2} ms",
+        verify_time.as_micros() as f64 / 1000.
+    );
 }

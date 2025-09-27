@@ -13,7 +13,7 @@ use crate::*;
 pub type RoundMerkleTree<F, EF> =
     MerkleTree<F, F, FlatMatrixView<F, EF, DenseMatrix<EF>>, DIGEST_ELEMS>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MerkleData<EF: ExtensionField<PF<EF>>> {
     Base(RoundMerkleTree<PF<EF>, PF<EF>>),
     Extension(RoundMerkleTree<PF<EF>, EF>),
@@ -87,7 +87,7 @@ impl<EF: ExtensionField<PF<EF>>> MerkleData<EF> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Witness<EF>
 where
     EF: ExtensionField<PF<EF>>,
@@ -117,7 +117,6 @@ where
     #[instrument(skip_all)]
     pub fn commit(
         &self,
-        dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         polynomial: &MleOwned<EF>,
     ) -> Witness<EF>
@@ -129,7 +128,6 @@ where
         // Perform DFT on the padded evaluations matrix
         let folded_matrix = reorder_and_dft(
             &polynomial.by_ref(),
-            dft,
             self.folding_factor.at_round(0),
             self.starting_log_inv_rate,
         );

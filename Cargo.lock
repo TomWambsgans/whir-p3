@@ -408,7 +408,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "p3-air"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -417,7 +417,7 @@ dependencies = [
 [[package]]
 name = "p3-baby-bear"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -430,7 +430,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -442,7 +442,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -456,7 +456,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -469,7 +469,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -495,7 +495,7 @@ dependencies = [
 [[package]]
 name = "p3-koala-bear"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -511,7 +511,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -526,7 +526,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "rayon",
 ]
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -546,7 +546,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "p3-commit",
@@ -563,7 +563,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -585,7 +585,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -597,7 +597,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -607,7 +607,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.3.0"
-source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#2a640fd24da3ea62557a1cb65ac51fbbe1f9bfc6"
+source = "git+https://github.com/TomWambsgans/Plonky3.git?branch=lean-multisig#66e2dfd1a683f70a4ecf5a9fabf54329caa186b0"
 dependencies = [
  "rayon",
  "serde",
@@ -847,9 +847,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.227"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80ece43fc6fbed4eb5392ab50c07334d3e577cbf40997ee896fe7af40bba4245"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
@@ -857,18 +857,18 @@ dependencies = [
 
 [[package]]
 name = "serde_core"
-version = "1.0.227"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a576275b607a2c86ea29e410193df32bc680303c82f31e275bbfcafe8b33be5"
+checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.227"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51e694923b8824cf0e9b382adf0f60d4e05f348f357b38833a3fa5ed7c2ede04"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",

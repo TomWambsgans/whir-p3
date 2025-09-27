@@ -15,6 +15,7 @@ pub use config::*;
 
 mod utils;
 pub(crate) use utils::*;
+pub use utils::precompute_dft_twiddles;
 
 mod wrappers;
 pub use wrappers::*;

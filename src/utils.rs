@@ -1,23 +1,15 @@
 use multilinear_toolkit::prelude::*;
+use p3_field::Field;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_util::log2_strict_usize;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use p3_field::TwoAdicField;
 
 use crate::EvalsDft;
 
-/// Samples a list of unique query indices from a folded evaluation domain, using transcript randomness.
-///
-/// This function is used to select random query locations for verifying proximity to a folded codeword.
-/// The folding reduces the domain size exponentially (e.g. by 2^folding_factor), so we sample indices
-/// in the reduced "folded" domain.
-///
-/// ## Parameters
-/// - `domain_size`: The size of the original evaluation domain (e.g., 2^22).
-/// - `folding_factor`: The number of folding rounds applied (e.g., k = 1 means domain halves).
-/// - `num_queries`: The number of query *indices* we want to obtain.
-/// - `challenger`: A Fiat–Shamir transcript used to sample randomness deterministically.
-///
-/// ## Returns
-/// A sorted and deduplicated list of random query indices in the folded domain.
 pub(crate) fn get_challenge_stir_queries<F: Field, Chal: ChallengeSampler<F>>(
     folded_domain_size: usize,
     num_queries: usize,
@@ -76,7 +68,6 @@ pub(crate) enum DftOutput<EF: Field> {
 
 pub(crate) fn reorder_and_dft<EF: ExtensionField<PF<EF>>>(
     evals: &MleRef<'_, EF>,
-    dft: &EvalsDft<PF<EF>>,
     folding_factor: usize,
     log_inv_rate: usize,
 ) -> DftOutput<EF>
@@ -85,6 +76,14 @@ where
 {
     let prepared_evals = prepare_evals_for_fft(&evals, folding_factor, log_inv_rate);
     let width = 1 << folding_factor;
+    let dft = global_dft::<PF<EF>>();
+    let dft_size = evals.n_vars() >> (folding_factor - log_inv_rate);
+    if dft.max_n_twiddles() < dft_size {
+        tracing::warn!(
+            "Twiddles have not been precomputed, for size = {}",
+            dft_size
+        );
+    }
     match prepared_evals {
         DftInput::Base(evals) => DftOutput::Base(
             dft.dft_algebra_batch_by_evals(RowMajorMatrix::new(evals, width))
@@ -118,11 +117,9 @@ fn prepare_evals_for_fft<EF: ExtensionField<PF<EF>>>(
             folding_factor,
             log_inv_rate,
         )),
-        MleRef::ExtensionPacked(evals) => DftInput::Extension(prepare_evals_for_fft_packed_extension(
-            evals,
-            folding_factor,
-            log_inv_rate,
-        )),
+        MleRef::ExtensionPacked(evals) => DftInput::Extension(
+            prepare_evals_for_fft_packed_extension(evals, folding_factor, log_inv_rate),
+        ),
     }
 }
 
@@ -179,4 +176,30 @@ fn prepare_evals_for_fft_packed_extension<EF: ExtensionField<PF<EF>>>(
             })
         })
         .collect()
+}
+
+type CacheKey = TypeId;
+type CacheValue = Arc<OnceLock<Arc<dyn Any + Send + Sync>>>;
+type SelectorsCache = Mutex<HashMap<CacheKey, CacheValue>>;
+
+static DFT_CACHE: OnceLock<SelectorsCache> = OnceLock::new();
+
+pub(crate) fn global_dft<F: Field>() -> Arc<EvalsDft<F>> {
+    let key = TypeId::of::<F>();
+    let mut map = DFT_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    let cell = map
+        .entry(key)
+        .or_insert_with(|| Arc::new(OnceLock::new()))
+        .clone();
+    cell.get_or_init(|| Arc::new(EvalsDft::<F>::default()) as Arc<dyn Any + Send + Sync>)
+        .clone()
+        .downcast::<EvalsDft<F>>()
+        .unwrap()
+}
+
+pub fn precompute_dft_twiddles<F: TwoAdicField>(n: usize) {
+    global_dft::<F>().update_twiddles(n);
 }

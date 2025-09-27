@@ -30,7 +30,6 @@ where
     #[instrument(name = "WHIR prove", skip_all)]
     pub fn prove(
         &self,
-        dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
@@ -61,8 +60,7 @@ where
 
         // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
-            self.round(round, dft, prover_state, &mut round_state)
-                .unwrap();
+            self.round(round, prover_state, &mut round_state).unwrap();
         }
 
         // Reverse the vector of verifier challenges (used as evaluation point)
@@ -77,7 +75,6 @@ where
     #[instrument(name = "WHIR batch prove", skip_all)]
     pub fn batch_prove(
         &self,
-        dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<EF>,
@@ -109,8 +106,7 @@ where
         .unwrap();
 
         for round in 0..=self.n_rounds() {
-            self.round(round, dft, prover_state, &mut round_state)
-                .unwrap();
+            self.round(round, prover_state, &mut round_state).unwrap();
         }
         MultilinearPoint(round_state.randomness_vec)
     }
@@ -118,7 +114,6 @@ where
     fn round(
         &self,
         round_index: usize,
-        dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()>
@@ -147,7 +142,6 @@ where
         let folded_matrix = info_span!("FFT").in_scope(|| {
             reorder_and_dft(
                 &folded_evaluations.by_ref(),
-                dft,
                 folding_factor_next,
                 log2_strict_usize(inv_rate),
             )

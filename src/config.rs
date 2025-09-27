@@ -403,10 +403,6 @@ where
         self.num_variables - self.folding_factor.total_number(self.n_rounds())
     }
 
-    pub const fn max_fft_size(&self) -> usize {
-        self.num_variables + self.starting_log_inv_rate - self.folding_factor.at_round(0)
-    }
-
     pub fn check_pow_bits(&self) -> bool {
         let max_bits = self.max_pow_bits;
 
