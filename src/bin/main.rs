@@ -54,7 +54,7 @@ fn main() {
 
     let vars_diff = 3;
 
-    let num_variables_a = 24;
+    let num_variables_a = 25;
     let num_variables_b = num_variables_a - vars_diff;
 
     let num_coeffs_a = 1 << num_variables_a;
