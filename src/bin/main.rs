@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use fiat_shamir::*;
 use multilinear_toolkit::prelude::*;
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
@@ -129,6 +128,7 @@ fn main() {
 
     let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
 
+    let polynomial_a = MleOwned::Base(polynomial_a);
     let time = Instant::now();
     let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
@@ -143,7 +143,7 @@ fn main() {
         &mut prover_state,
         statement_a.clone(),
         witness_a,
-        &polynomial_a,
+        &polynomial_a.by_ref(),
     );
 
     let opening_time = time.elapsed();
@@ -152,7 +152,7 @@ fn main() {
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
     // Parse the commitment
-    let parsed_commitment_a = params_a.parse_commitment(&mut verifier_state).unwrap();
+    let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
 
     let verif_time = Instant::now();
     params_a

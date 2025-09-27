@@ -20,7 +20,8 @@ pub enum MerkleData<EF: ExtensionField<PF<EF>>> {
 }
 
 impl<EF: ExtensionField<PF<EF>>> MerkleData<EF> {
-    pub fn build<H, C>(
+    #[instrument(skip_all, name = "build merkle tree")]
+    pub(crate) fn build<H, C>(
         merkle_hash: H,
         merkle_compress: C,
         matrix: DftOutput<EF>,
@@ -34,16 +35,53 @@ impl<EF: ExtensionField<PF<EF>>> MerkleData<EF> {
             merkle_hash,
             merkle_compress,
         );
+        let extension_mmcs_f = ExtensionMmcs::<PF<EF>, PF<EF>, _>::new(mmcs.clone());
+        let extension_mmcs_ef = ExtensionMmcs::<PF<EF>, EF, _>::new(mmcs.clone());
+
         match matrix {
             DftOutput::Base(m) => {
-                let extension_mmcs = ExtensionMmcs::<PF<EF>, PF<EF>, _>::new(mmcs.clone());
-                let (root, prover_data) = extension_mmcs.commit_matrix(m);
+                let (root, prover_data) = extension_mmcs_f.commit_matrix(m);
                 (MerkleData::Base(prover_data), root.into())
             }
             DftOutput::Extension(m) => {
-                let extension_mmcs = ExtensionMmcs::<PF<EF>, EF, _>::new(mmcs.clone());
-                let (root, prover_data) = extension_mmcs.commit_matrix(m);
+                let (root, prover_data) = extension_mmcs_ef.commit_matrix(m);
                 (MerkleData::Extension(prover_data), root.into())
+            }
+        }
+    }
+
+    pub(crate) fn open<H, C>(
+        &self,
+        index: usize,
+        merkle_hash: H,
+        merkle_compress: C,
+    ) -> (MleOwned<EF>, Vec<[PF<EF>; DIGEST_ELEMS]>)
+    where
+        H: MerkleHasher<EF>,
+        C: MerkleCompress<EF>,
+        [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
+    {
+        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C, DIGEST_ELEMS>::new(
+            merkle_hash,
+            merkle_compress,
+        );
+        let extension_mmcs_f = ExtensionMmcs::<PF<EF>, PF<EF>, _>::new(mmcs.clone());
+        let extension_mmcs_ef = ExtensionMmcs::<PF<EF>, EF, _>::new(mmcs.clone());
+
+        match self {
+            MerkleData::Base(prover_data) => {
+                let mut batch_opening = extension_mmcs_f.open_batch(index, prover_data);
+                (
+                    MleOwned::Base(std::mem::take(&mut batch_opening.opened_values[0])),
+                    batch_opening.opening_proof,
+                )
+            }
+            MerkleData::Extension(prover_data) => {
+                let mut batch_opening = extension_mmcs_ef.open_batch(index, prover_data);
+                (
+                    MleOwned::Extension(std::mem::take(&mut batch_opening.opened_values[0])),
+                    batch_opening.opening_proof,
+                )
             }
         }
     }
@@ -81,7 +119,7 @@ where
         &self,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        polynomial: &Mle<EF>,
+        polynomial: &MleOwned<EF>,
     ) -> Witness<EF>
     where
         H: MerkleHasher<EF>,
@@ -90,7 +128,7 @@ where
     {
         // Perform DFT on the padded evaluations matrix
         let folded_matrix = reorder_and_dft(
-            polynomial,
+            &polynomial.by_ref(),
             dft,
             self.folding_factor.at_round(0),
             self.starting_log_inv_rate,

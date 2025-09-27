@@ -75,7 +75,7 @@ pub(crate) enum DftOutput<EF: Field> {
 }
 
 pub(crate) fn reorder_and_dft<EF: ExtensionField<PF<EF>>>(
-    evals: &Mle<EF>,
+    evals: &MleRef<'_, EF>,
     dft: &EvalsDft<PF<EF>>,
     folding_factor: usize,
     log_inv_rate: usize,
@@ -98,27 +98,27 @@ where
 }
 
 fn prepare_evals_for_fft<EF: ExtensionField<PF<EF>>>(
-    evals: &Mle<EF>,
+    evals: &MleRef<'_, EF>,
     folding_factor: usize,
     log_inv_rate: usize,
 ) -> DftInput<EF> {
     match evals {
-        Mle::Base(evals) => DftInput::Base(prepare_evals_for_fft_unpacked(
+        MleRef::Base(evals) => DftInput::Base(prepare_evals_for_fft_unpacked(
             evals,
             folding_factor,
             log_inv_rate,
         )),
-        Mle::BasePacked(evals) => DftInput::Base(prepare_evals_for_fft_unpacked(
+        MleRef::BasePacked(evals) => DftInput::Base(prepare_evals_for_fft_unpacked(
             PFPacking::<EF>::unpack_slice(evals),
             folding_factor,
             log_inv_rate,
         )),
-        Mle::Extension(evals) => DftInput::Extension(prepare_evals_for_fft_unpacked(
+        MleRef::Extension(evals) => DftInput::Extension(prepare_evals_for_fft_unpacked(
             evals,
             folding_factor,
             log_inv_rate,
         )),
-        Mle::ExtensionPacked(evals) => DftInput::Extension(prepare_evals_for_fft_packed_extension(
+        MleRef::ExtensionPacked(evals) => DftInput::Extension(prepare_evals_for_fft_packed_extension(
             evals,
             folding_factor,
             log_inv_rate,

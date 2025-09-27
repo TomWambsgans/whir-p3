@@ -1,9 +1,6 @@
 use multilinear_toolkit::prelude::*;
-use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_matrix::dense::RowMajorMatrix;
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_util::{log2_ceil_usize, log2_strict_usize};
+use p3_util::log2_strict_usize;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
@@ -25,9 +22,9 @@ where
             .all(|e| e.num_variables() == self.num_variables)
     }
 
-    fn validate_witness(&self, witness: &Witness<EF>, polynomial: &[F]) -> bool {
+    fn validate_witness(&self, witness: &Witness<EF>, polynomial: &MleRef<'_, EF>) -> bool {
         assert_eq!(witness.ood_points.len(), witness.ood_answers.len());
-        polynomial.num_variables() == self.num_variables
+        polynomial.n_vars() == self.num_variables
     }
 
     #[instrument(name = "WHIR prove", skip_all)]
@@ -37,7 +34,7 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
-        polynomial: &Mle<EF>,
+        polynomial: &MleRef<'_, EF>,
     ) -> MultilinearPoint<EF>
     where
         H: MerkleHasher<EF>,
@@ -84,10 +81,10 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<EF>,
-        polynomial_a: &[F],
+        polynomial_a: &MleRef<'_, EF>,
         statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF>,
-        polynomial_b: &[EF],
+        polynomial_b: &MleRef<'_, EF>,
     ) -> MultilinearPoint<EF>
     where
         H: MerkleHasher<EF>,
@@ -97,8 +94,8 @@ where
     {
         // (1 - X).PolB + X.PolA
 
-        assert_eq!(polynomial_a.num_variables(), self.num_variables,);
-        assert!(polynomial_a.num_variables() >= polynomial_b.num_variables());
+        assert_eq!(polynomial_a.n_vars(), self.num_variables);
+        assert!(polynomial_a.n_vars() >= polynomial_b.n_vars());
         let mut round_state = RoundState::initialize_first_round_state_batch(
             self,
             prover_state,
@@ -123,7 +120,7 @@ where
         round_index: usize,
         dft: &EvalsDft<PF<EF>>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        round_state: &mut RoundState<F, EF>,
+        round_state: &mut RoundState<EF>,
     ) -> ProofResult<()>
     where
         H: MerkleHasher<EF>,
@@ -132,7 +129,6 @@ where
     {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables = self.num_variables - self.folding_factor.total_number(round_index);
-        assert_eq!(num_variables, folded_evaluations.num_variables());
 
         // Base case: final round reached
         if round_index == self.n_rounds() {
@@ -147,45 +143,32 @@ where
         // Compute polynomial evaluations and build Merkle tree
         let domain_reduction = 1 << self.rs_reduction_factor(round_index);
         let new_domain_size = round_state.domain_size / domain_reduction;
-        let inv_rate = new_domain_size / folded_evaluations.num_evals();
-        let folded_matrix = info_span!("fold matrix").in_scope(|| {
-            let evals_for_fft = prepare_evals_for_fft(
-                &folded_evaluations,
+        let inv_rate = new_domain_size >> num_variables;
+        let folded_matrix = info_span!("FFT").in_scope(|| {
+            reorder_and_dft(
+                &MleRef::ExtensionPacked(folded_evaluations),
+                dft,
                 folding_factor_next,
                 log2_strict_usize(inv_rate),
-            );
-
-            info_span!(
-                "dft",
-                height = evals_for_fft.len() >> folding_factor_next,
-                width = 1 << folding_factor_next
             )
-            .in_scope(|| {
-                dft.dft_algebra_batch_by_evals(RowMajorMatrix::new(
-                    evals_for_fft,
-                    1 << folding_factor_next,
-                ))
-            })
         });
 
-        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C>::new(
+        let (prover_data, root) = MerkleData::build(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
+            folded_matrix,
         );
-        let extension_mmcs_f = ExtensionMmcs::<PF<EF>, F, _>::new(mmcs.clone());
-        let extension_mmcs_ef = ExtensionMmcs::<PF<EF>, EF, _>::new(mmcs.clone());
 
-        let (root, prover_data) =
-            info_span!("commit matrix").in_scope(|| extension_mmcs_ef.commit_matrix(folded_matrix));
-
-        prover_state.add_base_scalars(root.as_ref());
+        prover_state.add_base_scalars(&root);
 
         // Handle OOD (Out-Of-Domain) samples
-        let (ood_points, ood_answers) = sample_ood_points::<F, EF, _>(
+        let (ood_points, ood_answers) = sample_ood_points::<EF, _>(
             prover_state,
             round_params.ood_samples,
             num_variables,
-            |point| info_span!("ood evaluation").in_scope(|| folded_evaluations.evaluate(point)),
+            |point| {
+                info_span!("ood evaluation").in_scope(|| eval_packed(folded_evaluations, point))
+            },
         );
 
         prover_state.pow_grinding(round_params.pow_bits);
@@ -205,23 +188,32 @@ where
         let stir_evaluations = match &round_state.merkle_prover_data {
             None => {
                 if round_state.commitment_merkle_prover_data_b.is_some() {
-                    let mut answers_a = Vec::<Vec<F>>::new();
-                    let mut answers_b = Vec::<Vec<EF>>::new();
+                    let mut answers_a = Vec::<MleOwned<EF>>::new();
+                    let mut answers_b = Vec::<MleOwned<EF>>::new();
 
                     {
                         let mut merkle_proofs = Vec::new();
                         for challenge in &stir_challenges_indexes {
-                            let commitment = extension_mmcs_f.open_batch(
+                            let (answer, proof) = round_state.commitment_merkle_prover_data_a.open(
                                 *challenge,
-                                &round_state.commitment_merkle_prover_data_a,
+                                self.merkle_hash.clone(),
+                                self.merkle_compress.clone(),
                             );
-                            answers_a.push(commitment.opened_values[0].clone());
-                            merkle_proofs.push(commitment.opening_proof);
+                            answers_a.push(answer);
+                            merkle_proofs.push(proof);
                         }
 
                         // merkle leaves
                         for answer in &answers_a {
-                            prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
+                            match answer {
+                                MleOwned::Base(answer) => {
+                                    prover_state.hint_base_scalars(answer);
+                                }
+                                MleOwned::Extension(answer) => {
+                                    prover_state.hint_extension_scalars(answer);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
 
                         // merkle authentication proof
@@ -234,20 +226,30 @@ where
                     {
                         let mut merkle_proofs = Vec::new();
                         for challenge in &stir_challenges_indexes {
-                            let commitment = extension_mmcs_ef.open_batch(
-                                *challenge,
-                                round_state
-                                    .commitment_merkle_prover_data_b
-                                    .as_ref()
-                                    .unwrap(),
-                            );
-                            answers_b.push(commitment.opened_values[0].clone());
-                            merkle_proofs.push(commitment.opening_proof);
+                            let (answer, proof) = round_state
+                                .commitment_merkle_prover_data_b
+                                .as_ref()
+                                .unwrap()
+                                .open(
+                                    *challenge,
+                                    self.merkle_hash.clone(),
+                                    self.merkle_compress.clone(),
+                                );
+                            answers_b.push(answer);
+                            merkle_proofs.push(proof);
                         }
 
                         // merkle leaves
                         for answer in &answers_b {
-                            prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
+                            match answer {
+                                MleOwned::Base(answer) => {
+                                    prover_state.hint_base_scalars(answer);
+                                }
+                                MleOwned::Extension(answer) => {
+                                    prover_state.hint_extension_scalars(answer);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
 
                         // merkle authentication proof
@@ -260,8 +262,8 @@ where
 
                     let mut stir_evaluations = Vec::new();
                     for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
-                        let vars_a = log2_strict_usize(answer_a.len());
-                        let vars_b = log2_strict_usize(answer_b.len());
+                        let vars_a = answer_a.by_ref().n_vars();
+                        let vars_b = answer_b.by_ref().n_vars();
                         let a_trunc = round_state.folding_randomness[1..].to_vec();
                         let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
                         let b_trunc =
@@ -279,18 +281,30 @@ where
 
                     stir_evaluations
                 } else {
-                    let mut answers = Vec::<Vec<F>>::with_capacity(stir_challenges_indexes.len());
+                    let mut answers =
+                        Vec::<MleOwned<EF>>::with_capacity(stir_challenges_indexes.len());
                     let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                     for challenge in &stir_challenges_indexes {
-                        let commitment = extension_mmcs_f
-                            .open_batch(*challenge, &round_state.commitment_merkle_prover_data_a);
-                        answers.push(commitment.opened_values[0].clone());
-                        merkle_proofs.push(commitment.opening_proof);
+                        let (answer, proof) = round_state.commitment_merkle_prover_data_a.open(
+                            *challenge,
+                            self.merkle_hash.clone(),
+                            self.merkle_compress.clone(),
+                        );
+                        answers.push(answer);
+                        merkle_proofs.push(proof);
                     }
 
                     // merkle leaves
                     for answer in &answers {
-                        prover_state.hint_base_scalars(&flatten_scalars_to_base(answer));
+                        match answer {
+                            MleOwned::Base(answer) => {
+                                prover_state.hint_base_scalars(answer);
+                            }
+                            MleOwned::Extension(answer) => {
+                                prover_state.hint_extension_scalars(answer);
+                            }
+                            _ => unreachable!(),
+                        }
                     }
 
                     // merkle authentication proof
@@ -314,14 +328,26 @@ where
                 let mut answers = Vec::with_capacity(stir_challenges_indexes.len());
                 let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                 for challenge in &stir_challenges_indexes {
-                    let commitment = extension_mmcs_ef.open_batch(*challenge, data);
-                    answers.push(commitment.opened_values[0].clone());
-                    merkle_proofs.push(commitment.opening_proof);
+                    let (answer, proof) = data.open(
+                        *challenge,
+                        self.merkle_hash.clone(),
+                        self.merkle_compress.clone(),
+                    );
+                    answers.push(answer);
+                    merkle_proofs.push(proof);
                 }
 
                 // merkle leaves
                 for answer in &answers {
-                    prover_state.hint_extension_scalars(answer);
+                    match answer {
+                        MleOwned::Base(answer) => {
+                            prover_state.hint_base_scalars(answer);
+                        }
+                        MleOwned::Extension(answer) => {
+                            prover_state.hint_extension_scalars(answer);
+                        }
+                        _ => unreachable!(),
+                    }
                 }
 
                 // merkle authentication proof
@@ -380,7 +406,7 @@ where
         // Update round state
         round_state.domain_size = new_domain_size;
         round_state.next_domain_gen =
-            F::two_adic_generator(new_domain_size.ilog2() as usize - folding_factor_next);
+            PF::<EF>::two_adic_generator(log2_strict_usize(new_domain_size) - folding_factor_next);
         round_state.folding_randomness = folding_randomness;
         round_state.merkle_prover_data = Some(prover_data);
 
@@ -391,7 +417,7 @@ where
         &self,
         round_index: usize,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        round_state: &mut RoundState<F, EF>,
+        round_state: &mut RoundState<EF>,
     ) -> ProofResult<()>
     where
         H: MerkleHasher<EF>,
@@ -399,7 +425,7 @@ where
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
         // Directly send coefficients of the polynomial to the verifier.
-        prover_state.add_extension_scalars(&round_state.sumcheck_prover.evals);
+        prover_state.add_extension_scalars(&unpack_extension(&round_state.sumcheck_prover.evals));
 
         prover_state.pow_grinding(self.final_pow_bits);
 
@@ -411,69 +437,42 @@ where
             prover_state,
         );
 
-        // Every query requires opening these many in the previous Merkle tree
-        let mmcs = MerkleTreeMmcs::<PFPacking<EF>, PFPacking<EF>, H, C>::new(
-            self.merkle_hash.clone(),
-            self.merkle_compress.clone(),
-        );
-        let extension_mmcs = ExtensionMmcs::new(mmcs.clone());
+        {
+            let prev_merkle_data = match &round_state.merkle_prover_data {
+                None => &round_state.commitment_merkle_prover_data_a,
+                Some(data) => data,
+            };
 
-        match &round_state.merkle_prover_data {
-            None => {
-                let mut answers = Vec::<Vec<PF<EF>>>::with_capacity(final_challenge_indexes.len());
-                let mut merkle_proofs = Vec::with_capacity(final_challenge_indexes.len());
+            let mut answers = Vec::<MleOwned<EF>>::with_capacity(final_challenge_indexes.len());
+            let mut merkle_proofs = Vec::with_capacity(final_challenge_indexes.len());
 
-                for challenge in final_challenge_indexes {
-                    let commitment =
-                        mmcs.open_batch(challenge, &round_state.commitment_merkle_prover_data_a);
-                    answers.push(commitment.opened_values[0].clone());
-                    merkle_proofs.push(commitment.opening_proof);
-                }
+            for challenge in final_challenge_indexes {
+                let (answer, proof) = prev_merkle_data.open(
+                    challenge,
+                    self.merkle_hash.clone(),
+                    self.merkle_compress.clone(),
+                );
+                answers.push(answer);
+                merkle_proofs.push(proof);
+            }
 
-                // merkle leaves
-                for answer in &answers {
-                    prover_state.hint_base_scalars(answer);
-                }
-
-                // merkle authentication proof
-                for merkle_proof in &merkle_proofs {
-                    for digest in merkle_proof {
-                        prover_state.hint_base_scalars(digest);
+            // merkle leaves
+            for answer in &answers {
+                match answer {
+                    MleOwned::Base(answer) => {
+                        prover_state.hint_base_scalars(answer);
                     }
+                    MleOwned::Extension(answer) => {
+                        prover_state.hint_extension_scalars(answer);
+                    }
+                    _ => unreachable!(),
                 }
             }
 
-            Some(data) => {
-                let mut answers = Vec::with_capacity(final_challenge_indexes.len());
-                let mut merkle_proofs = Vec::with_capacity(final_challenge_indexes.len());
-                for challenge in final_challenge_indexes {
-                    let commitment = extension_mmcs.open_batch(challenge, data);
-                    answers.push(commitment.opened_values[0].clone());
-                    merkle_proofs.push(commitment.opening_proof);
-
-                    let folded_eval =
-                        commitment.opened_values[0].evaluate(&round_state.folding_randomness);
-                    assert_eq!(
-                        folded_eval,
-                        round_state.sumcheck_prover.evals.evaluate(
-                            &MultilinearPoint::expand_from_univariate(
-                                EF::from(round_state.next_domain_gen.exp_u64(challenge as u64)),
-                                log2_ceil_usize(round_state.sumcheck_prover.evals.len())
-                            )
-                        )
-                    );
-                }
-
-                // merkle leaves
-                for answer in &answers {
-                    prover_state.hint_extension_scalars(answer);
-                }
-
-                // merkle authentication proof
-                for merkle_proof in &merkle_proofs {
-                    for digest in merkle_proof {
-                        prover_state.hint_base_scalars(digest);
-                    }
+            // merkle authentication proof
+            for merkle_proof in &merkle_proofs {
+                for digest in merkle_proof {
+                    prover_state.hint_base_scalars(digest);
                 }
             }
         }
@@ -501,14 +500,14 @@ where
     fn compute_stir_queries(
         &self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        round_state: &RoundState<F, EF>,
+        round_state: &RoundState<EF>,
         num_variables: usize,
-        round_params: &RoundConfig<F>,
+        round_params: &RoundConfig<EF>,
         ood_points: &[EF],
         round_index: usize,
     ) -> ProofResult<(
         Vec<MultilinearPoint<EF>>,
-        Vec<MultilinearPoint<F>>,
+        Vec<MultilinearPoint<PF<EF>>>,
         Vec<usize>,
     )> {
         let stir_challenges_indexes = get_challenge_stir_queries(
@@ -538,11 +537,11 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct SumcheckSingle<EF> {
+pub struct SumcheckSingle<EF: ExtensionField<PF<EF>>> {
     /// Evaluations of the polynomial `p(X)`.
-    pub(crate) evals: Vec<EF>,
+    pub(crate) evals: Vec<EFPacking<EF>>,
     /// Evaluations of the equality polynomial used for enforcing constraints.
-    pub(crate) weights: Vec<EF>,
+    pub(crate) weights: Vec<EFPacking<EF>>,
     /// Accumulated sum incorporating equality constraints.
     pub(crate) sum: EF,
 }
@@ -564,7 +563,7 @@ where
             .iter()
             .zip(combination_randomness.iter())
             .for_each(|(point, &rand)| {
-                compute_eval_eq::<_, _, true>(point, &mut self.weights, rand);
+                compute_eval_eq_packed::<_, true>(point, &mut self.weights, rand);
             });
 
         self.sum += combination_randomness
@@ -574,14 +573,12 @@ where
             .sum::<EF>();
     }
 
-    pub(crate) fn add_new_base_equality<F: Field>(
+    pub(crate) fn add_new_base_equality(
         &mut self,
-        points: &[MultilinearPoint<F>],
+        points: &[MultilinearPoint<PF<EF>>],
         evaluations: &[EF],
         combination_randomness: &[EF],
-    ) where
-        EF: ExtensionField<F>,
-    {
+    ) {
         assert_eq!(combination_randomness.len(), points.len());
         assert_eq!(evaluations.len(), points.len());
 
@@ -591,7 +588,7 @@ where
             .iter()
             .zip(combination_randomness.iter())
             .for_each(|(point, &rand)| {
-                compute_eval_eq_base::<_, _, true>(point, &mut self.weights, rand);
+                compute_eval_eq_base_packed::<_, _, true>(point, &mut self.weights, rand);
             });
 
         // Accumulate the weighted sum (cheap, done sequentially)
@@ -611,7 +608,7 @@ where
         let num_vars_start = log2_strict_usize(self.evals.len());
         let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
             1,
-            MleGroupOwned::Extension(vec![
+            MleGroupOwned::ExtensionPacked(vec![
                 std::mem::take(&mut self.evals),
                 std::mem::take(&mut self.weights),
             ]),
@@ -628,8 +625,8 @@ where
 
         self.sum = new_sum;
         let mut folded = folds.as_owned().unwrap();
-        self.evals = std::mem::take(&mut folded.as_extension_mut().unwrap()[0]);
-        self.weights = std::mem::take(&mut folded.as_extension_mut().unwrap()[1]);
+        self.evals = std::mem::take(&mut folded.as_extension_packed_mut().unwrap()[0]);
+        self.weights = std::mem::take(&mut folded.as_extension_packed_mut().unwrap()[1]);
 
         assert_eq!(
             log2_strict_usize(self.evals.len()),
@@ -640,22 +637,33 @@ where
     }
 
     pub(crate) fn run_initial_sumcheck_rounds(
-        evals: &Mle<EF>,
+        evals: &MleRef<'_, EF>,
         statement: &[Evaluation<EF>],
         combination_randomness: EF,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         _pow_bits: usize, // TODO
-    ) -> (Self, MultilinearPoint<EF>)
-    {
+    ) -> (Self, MultilinearPoint<EF>) {
         assert_ne!(folding_factor, 0);
         let mut res = Vec::with_capacity(folding_factor);
 
-        let (mut weights, mut sum) =
-            combine_statement::<PF<EF>, EF>(statement, combination_randomness);
+        let (mut weights, mut sum) = combine_statement::<EF>(statement, combination_randomness);
 
         // In the first round base field evaluations are folded into extension field elements
-        let sumcheck_poly = compute_sumcheck_polynomial(evals, &weights, sum);
+        let sumcheck_poly = match evals {
+            MleRef::Base(evals) => compute_product_sumcheck_polynomial(
+                PFPacking::<EF>::pack_slice(&evals),
+                &weights,
+                sum,
+                |e| EFPacking::<EF>::to_ext_iter([e]).collect(),
+            ),
+            MleRef::ExtensionPacked(evals) => {
+                compute_product_sumcheck_polynomial(evals, &weights, sum, |e| {
+                    EFPacking::<EF>::to_ext_iter([e]).collect()
+                })
+            }
+            _ => unimplemented!(),
+        };
         prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
 
         // TODO: re-enable PoW grinding
@@ -664,10 +672,20 @@ where
         // Sample verifier challenge.
         let r: EF = prover_state.sample();
 
-        let compressed_evals = info_span!("initial compression").in_scope(|| {
-            fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
-            fold_multilinear(&evals, &[(EF::ONE - r), r], &|a, b| b * a)
-        });
+        let compressed_evals: Vec<EFPacking<EF>> =
+            info_span!("initial compression").in_scope(|| {
+                fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
+                match evals {
+                    MleRef::Base(evals) => {
+                        let folded = fold_multilinear(&evals, &[(EF::ONE - r), r], &|a, b| b * a);
+                        pack_extension(&folded) // TODO avoid the intermediate allocation "folded"
+                    }
+                    MleRef::ExtensionPacked(evals) => {
+                        fold_multilinear(&evals, &[(EF::ONE - r), r], &|a, b| a * b)
+                    }
+                    _ => unimplemented!(),
+                }
+            });
 
         sum = sumcheck_poly.evaluate(r);
 
@@ -706,7 +724,7 @@ where
 
     pub(crate) commitment_merkle_prover_data_b: Option<MerkleData<EF>>,
 
-    pub(crate) merkle_prover_data: Option<RoundMerkleTree<PF<EF>, EF>>,
+    pub(crate) merkle_prover_data: Option<MerkleData<EF>>,
 
     pub(crate) randomness_vec: Vec<EF>,
 
@@ -724,7 +742,7 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         mut statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
-        polynomial: &Mle<EF>,
+        polynomial: &MleRef<'_, EF>,
     ) -> ProofResult<Self> {
         // Convert witness ood_points into constraints
         let new_constraints = witness
@@ -758,8 +776,9 @@ where
 
         Ok(Self {
             domain_size: prover.starting_domain_size(),
-            next_domain_gen: F::two_adic_generator(
-                prover.starting_domain_size().ilog2() as usize - prover.folding_factor.at_round(0),
+            next_domain_gen: PF::<EF>::two_adic_generator(
+                log2_strict_usize(prover.starting_domain_size())
+                    - prover.folding_factor.at_round(0),
             ),
             sumcheck_prover,
             folding_randomness,
@@ -776,10 +795,10 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<EF>,
-        polynomial_a: &[F],
+        polynomial_a: &MleRef<'_, EF>,
         statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF>,
-        polynomial_b: &[EF],
+        polynomial_b: &MleRef<'_, EF>,
     ) -> ProofResult<Self> {
         let n_vars_a = statement_a[0].num_variables();
         let n_vars_b = statement_b[0].num_variables();
@@ -807,16 +826,33 @@ where
             statement.push(constraint);
         }
 
-        let mut polynomial = EF::zero_vec(polynomial_a.num_evals() * 2);
-        parallel_clone(&polynomial_b, &mut polynomial[..polynomial_b.len()]);
-        polynomial_a
-            .par_iter()
-            .zip(polynomial[polynomial_a.len()..].par_iter_mut())
-            .for_each(|(a, b)| {
-                *b = EF::from(*a);
-            }); // TODO embedding overhead
+        let mut polynomial = EFPacking::<EF>::zero_vec(polynomial_a.n_vars() * 2);
+
+        match polynomial_b {
+            MleRef::ExtensionPacked(polynomial_b) => {
+                parallel_clone(&polynomial_b, &mut polynomial[..polynomial_b.len()]);
+            }
+            _ => unimplemented!(),
+        }
+
+        match polynomial_a {
+            MleRef::Base(polynomial_a) => {
+                // TODO embedding overhead
+                let embedded = polynomial_a
+                    .par_iter()
+                    .map(|&x| EF::from(x))
+                    .collect::<Vec<_>>();
+                parallel_clone(
+                    &pack_extension(&embedded),
+                    &mut polynomial[polynomial_a.len()..],
+                );
+            }
+            _ => unimplemented!(),
+        }
 
         let combination_randomness_gen: EF = prover_state.sample();
+
+        let polynomial = MleRef::ExtensionPacked(&polynomial);
 
         let (sumcheck_prover, folding_randomness) = SumcheckSingle::run_initial_sumcheck_rounds(
             &polynomial,
@@ -835,8 +871,9 @@ where
 
         Ok(Self {
             domain_size: prover.starting_domain_size(),
-            next_domain_gen: F::two_adic_generator(
-                prover.starting_domain_size().ilog2() as usize - prover.folding_factor.at_round(0),
+            next_domain_gen: PF::<EF>::two_adic_generator(
+                log2_strict_usize(prover.starting_domain_size())
+                    - prover.folding_factor.at_round(0),
             ),
             sumcheck_prover,
             folding_randomness,
@@ -876,60 +913,25 @@ fn add_constraints_in_front<EF: Field>(
 }
 
 #[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
-fn combine_statement<Base, EF>(statement: &[Evaluation<EF>], challenge: EF) -> (Vec<EF>, EF)
+fn combine_statement<EF>(statement: &[Evaluation<EF>], challenge: EF) -> (Vec<EFPacking<EF>>, EF)
 where
-    Base: Field,
-    EF: ExtensionField<Base>,
+    EF: ExtensionField<PF<EF>>,
 {
     let num_variables = statement[0].num_variables();
     assert!(statement.iter().all(|e| e.num_variables() == num_variables));
 
-    let mut combined_evals = EF::zero_vec(1 << num_variables);
+    let mut combined_evals =
+        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
     let (combined_sum, _) = statement.iter().fold(
         (EF::ZERO, EF::ONE),
         |(mut acc_sum, gamma_pow), constraint| {
-            compute_sparse_eval_eq::<Base, EF>(&constraint.point, &mut combined_evals, gamma_pow);
+            compute_sparse_eval_eq_packed::<EF>(&constraint.point, &mut combined_evals, gamma_pow);
             acc_sum += constraint.value * gamma_pow;
             (acc_sum, gamma_pow * challenge)
         },
     );
 
     (combined_evals, combined_sum)
-}
-
-#[instrument(skip_all)]
-pub(crate) fn compute_sumcheck_polynomial<EF: ExtensionField<PF<EF>>>(
-    evals: &Mle<EF>,
-    weights: &Vec<EF>,
-    sum: EF,
-) -> DensePolynomial<EF> {
-    let (c0, c2) = (0..evals.len() / 2)
-        .into_par_iter()
-        .map(|i| {
-            sumcheck_quadratic::<F, EF>(
-                evals[i],
-                evals[i + evals.len() / 2],
-                weights[i],
-                weights[i + evals.len() / 2],
-            )
-        })
-        .reduce(
-            || (EF::ZERO, EF::ZERO),
-            |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
-        );
-
-    let c1 = sum - c0.double() - c2;
-
-    let eval_0 = c0;
-    let eval_1 = c0 + c1 + c2;
-    let eval_2 = eval_1 + c1 + c2 + c2.double();
-
-    DensePolynomial::lagrange_interpolation(&[
-        (PF::<EF>::ZERO, eval_0),
-        (PF::<EF>::ONE, eval_1),
-        (PF::<EF>::TWO, eval_2),
-    ])
-    .expect("Failed to interpolate sumcheck polynomial")
 }
 
 #[inline]

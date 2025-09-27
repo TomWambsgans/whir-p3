@@ -63,15 +63,17 @@ impl<F: Field, EF: ExtensionField<F>> ParsedCommitment<F, EF> {
     }
 }
 
-impl<'a, F, EF, H, C> WhirConfig<F, EF, H, C>
+impl<'a, EF, H, C> WhirConfig<EF, H, C>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
+    EF: TwoAdicField + ExtensionField<PF<EF>>,
 {
-    pub fn parse_commitment(
+    pub fn parse_commitment<F: TwoAdicField>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-    ) -> ProofResult<ParsedCommitment<F, EF>> {
+    ) -> ProofResult<ParsedCommitment<F, EF>>
+    where
+        EF: ExtensionField<F>,
+    {
         ParsedCommitment::<F, EF>::parse(
             verifier_state,
             self.num_variables,
@@ -80,14 +82,13 @@ where
     }
 }
 
-impl<'a, F, EF, H, C> WhirConfig<F, EF, H, C>
+impl<'a, EF, H, C> WhirConfig<EF, H, C>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField + ExtensionField<PF<EF>>,
-    F: ExtensionField<PF<EF>>,
+    EF: TwoAdicField + ExtensionField<PF<EF>>,
+    PF<EF>: TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn batch_verify(
+    pub fn batch_verify<F: TwoAdicField>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         parsed_commitment_a: &ParsedCommitment<F, EF>,
@@ -96,6 +97,8 @@ where
         statement_b: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
+        EF: ExtensionField<F>,
+        F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
@@ -166,11 +169,11 @@ where
 
             // Verify in-domain challenges on the previous commitment.
             let stir_constraints = if round_index == 0 {
-                self.verify_stir_challenges_batched(
+                self.verify_stir_challenges_batched::<F>(
                     verifier_state,
                     round_params,
-                    &parsed_commitment_a,
-                    &parsed_commitment_b,
+                    parsed_commitment_a,
+                    parsed_commitment_b,
                     round_folding_randomness.last().unwrap(),
                     round_index,
                 )?
@@ -257,13 +260,15 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn verify(
+    pub fn verify<F: TwoAdicField>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
         parsed_commitment: &ParsedCommitment<F, EF>,
         statement: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
+        EF: ExtensionField<F>,
+        F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
@@ -429,15 +434,17 @@ where
         Ok(combination_randomness)
     }
 
-    fn verify_stir_challenges(
+    fn verify_stir_challenges<F: Field>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        params: &RoundConfig<F>,
+        params: &RoundConfig<EF>,
         commitment: &ParsedCommitment<F, EF>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Evaluation<EF>>>
     where
+        EF: ExtensionField<F>,
+        F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
@@ -459,7 +466,7 @@ where
             height: params.domain_size >> params.folding_factor,
             width: 1 << params.folding_factor,
         }];
-        let answers = self.verify_merkle_proof(
+        let answers = self.verify_merkle_proof::<F>(
             verifier_state,
             &commitment.root,
             &stir_challenges_indexes,
@@ -490,16 +497,18 @@ where
         Ok(stir_constraints)
     }
 
-    fn verify_stir_challenges_batched(
+    fn verify_stir_challenges_batched<F: Field>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        params: &RoundConfig<F>,
+        params: &RoundConfig<EF>,
         commitment_a: &ParsedCommitment<F, EF>,
         commitment_b: &ParsedCommitment<EF, EF>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
     ) -> ProofResult<Vec<Evaluation<EF>>>
     where
+        EF: ExtensionField<F>,
+        F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
@@ -521,7 +530,7 @@ where
             height: params.domain_size >> params.folding_factor,
             width: 1 << params.folding_factor,
         }];
-        let answers_a = self.verify_merkle_proof(
+        let answers_a = self.verify_merkle_proof::<F>(
             verifier_state,
             &commitment_a.root,
             &stir_challenges_indexes,
@@ -539,7 +548,7 @@ where
             width: 1 << (params.folding_factor - vars_diff),
         }];
         let answers_b = self
-            .verify_merkle_proof(
+            .verify_merkle_proof::<EF>(
                 verifier_state,
                 &commitment_b.root,
                 &stir_challenges_indexes,
@@ -585,10 +594,10 @@ where
         Ok(stir_constraints)
     }
 
-    fn verify_merkle_proof(
+    fn verify_merkle_proof<F: Field>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        root: &Hash<PF<EF>, PF<EF>>,
+        root: &[PF<EF>; DIGEST_ELEMS],
         indices: &[usize],
         dimensions: &[Dimensions],
         leafs_base_field: bool,
@@ -596,11 +605,13 @@ where
         var_shift: usize,
     ) -> ProofResult<Vec<Vec<EF>>>
     where
+        EF: ExtensionField<F>,
+        F: ExtensionField<PF<EF>>,
         H: MerkleHasher<EF>,
         C: MerkleCompress<EF>,
         [PF<EF>; DIGEST_ELEMS]: Serialize + for<'de> Deserialize<'de>,
     {
-        let mmcs = MerkleTreeMmcs::<PF<EF>, PF<EF>, H, C>::new(
+        let mmcs = MerkleTreeMmcs::<PF<EF>, PF<EF>, H, C, DIGEST_ELEMS>::new(
             self.merkle_hash.clone(),
             self.merkle_compress.clone(),
         );
@@ -639,7 +650,7 @@ where
                 // Verify the Merkle opening for the claimed leaf against the Merkle root.
                 extension_mmcs_f
                     .verify_batch(
-                        root,
+                        &root.clone().into(),
                         dimensions,
                         index,
                         BatchOpeningRef {
@@ -686,7 +697,7 @@ where
                 // Verify the Merkle opening against the extension MMCS.
                 extension_mmcs_ef
                     .verify_batch(
-                        root,
+                        &root.clone().into(),
                         dimensions,
                         index,
                         BatchOpeningRef {
