@@ -3,7 +3,9 @@ use std::time::Instant;
 use multilinear_toolkit::prelude::*;
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
-use p3_koala_bear::{default_koalabear_poseidon2_16, KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
+use p3_koala_bear::{
+    KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB, default_koalabear_poseidon2_16,
+};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 // use tracing_forest::{ForestLayer, util::LevelFilter};
@@ -107,7 +109,6 @@ fn main() {
         let eval = polynomial_b.evaluate(point_b);
         statement_b.push(Evaluation::new(point_b.clone(), eval));
     }
-
 
     let challenger = MyChallenger::new(poseidon16);
 

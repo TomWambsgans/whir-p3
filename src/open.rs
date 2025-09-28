@@ -502,7 +502,6 @@ where
 
         let (mut weights, mut sum) = combine_statement::<EF>(statement, combination_randomness);
 
-        // In the first round base field evaluations are folded into extension field elements
         let sumcheck_poly = match evals {
             MleRef::Base(evals) => compute_product_sumcheck_polynomial(
                 PFPacking::<EF>::pack_slice(&evals),
@@ -522,7 +521,6 @@ where
         // TODO: re-enable PoW grinding
         // prover_state.pow_grinding(pow_bits);
 
-        // Sample verifier challenge.
         let r: EF = prover_state.sample();
 
         let compressed_evals: Vec<EFPacking<EF>> =
@@ -541,6 +539,90 @@ where
             });
 
         sum = sumcheck_poly.evaluate(r);
+
+        res.push(r);
+
+        let mut sumcheck = Self {
+            evals: MleOwned::ExtensionPacked(compressed_evals),
+            weights: MleOwned::ExtensionPacked(weights),
+            sum,
+        };
+
+        // Apply rest of sumcheck rounds
+        let remaining_challenges = info_span!("remaining initial sumcheck rounds").in_scope(|| {
+            sumcheck.run_sumcheck_many_rounds(prover_state, folding_factor - 1, _pow_bits)
+        });
+        res.extend(remaining_challenges.0);
+
+        (sumcheck, MultilinearPoint(res))
+    }
+
+    pub(crate) fn run_initial_sumcheck_rounds_batched(
+        pol_a: &MleRef<'_, EF>,
+        pol_b: &MleRef<'_, EF>,
+        statement: &[Evaluation<EF>],
+        combination_randomness: EF,
+        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        folding_factor: usize,
+        _pow_bits: usize, // TODO
+    ) -> (Self, MultilinearPoint<EF>) {
+        // TODO this is still not 100% optimized, in particular weights maybe be sparse on one side
+
+        assert_ne!(folding_factor, 0);
+        let mut res = Vec::with_capacity(folding_factor);
+
+        let (mut weights, linear_a_f_1, linear_b_f_0) =
+            combine_statement_batched::<EF>(statement, combination_randomness);
+
+        let pol_a = match pol_a {
+            MleRef::Base(evals) => evals,
+            _ => unimplemented!(),
+        };
+        let pol_b = match pol_b {
+            MleRef::ExtensionPacked(evals) => evals,
+            _ => unimplemented!(),
+        };
+
+        let linear_b_f_1: EF = dot_product_ef_packed_par(
+            &weights[weights.len() / 2..weights.len() / 2 + pol_b.len()],
+            &pol_b,
+        );
+        let linear_a_f_0: EF = dot_product_ef_packed_par(
+            &weights[..weights.len() / 2],
+            PFPacking::<EF>::pack_slice(pol_a),
+        );
+
+        let one_minus_x = DensePolynomial::new(vec![EF::ONE, -EF::ONE]);
+        let x = DensePolynomial::new(vec![EF::ZERO, EF::ONE]);
+        let sumcheck_poly_a = DensePolynomial::new(vec![linear_a_f_0, linear_a_f_1 - linear_a_f_0]);
+        let sumcheck_poly_b = DensePolynomial::new(vec![linear_b_f_0, linear_b_f_1 - linear_b_f_0]);
+        let sumcheck_poly = &(&one_minus_x * &sumcheck_poly_b) + &(&x * &sumcheck_poly_a);
+
+        prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
+
+        // TODO: re-enable PoW grinding
+        // prover_state.pow_grinding(pow_bits);
+
+        let r: EF = prover_state.sample();
+
+        let compressed_evals: Vec<EFPacking<EF>> =
+            info_span!("initial compression").in_scope(|| {
+                let pol_a_packed = PFPacking::<EF>::pack_slice(pol_a);
+                let r_packed = EFPacking::<EF>::from(r);
+                fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
+                pol_a_packed
+                    .par_iter()
+                    .zip(pol_b.par_iter())
+                    .map(|(&a, &b)| (-b + a) * r + b)
+                    .chain(
+                        pol_a_packed[pol_b.len()..]
+                            .par_iter()
+                            .map(|&a| r_packed * a),
+                    )
+                    .collect()
+            });
+
+        let sum = sumcheck_poly.evaluate(r);
 
         res.push(r);
 
@@ -661,43 +743,18 @@ where
             statement.push(constraint);
         }
 
-        let mut polynomial =
-            EFPacking::<EF>::zero_vec(polynomial_a.unpacked_len() * 2 / packing_width::<EF>());
-
-        match polynomial_b {
-            MleRef::ExtensionPacked(polynomial_b) => {
-                parallel_clone(&polynomial_b, &mut polynomial[..polynomial_b.len()]);
-            }
-            _ => unimplemented!(),
-        }
-
-        match polynomial_a {
-            MleRef::Base(polynomial_a) => {
-                // TODO embedding overhead
-                let embedded = polynomial_a
-                    .par_iter()
-                    .map(|&x| EF::from(x))
-                    .collect::<Vec<_>>();
-                parallel_clone(
-                    &pack_extension(&embedded),
-                    &mut polynomial[polynomial_a.len() / packing_width::<EF>()..],
-                );
-            }
-            _ => unimplemented!(),
-        }
-
         let combination_randomness_gen: EF = prover_state.sample();
 
-        let polynomial = MleRef::ExtensionPacked(&polynomial);
-
-        let (sumcheck_prover, folding_randomness) = SumcheckSingle::run_initial_sumcheck_rounds(
-            &polynomial,
-            &statement,
-            combination_randomness_gen,
-            prover_state,
-            prover.folding_factor.at_round(0) + 1,
-            prover.starting_folding_pow_bits,
-        );
+        let (sumcheck_prover, folding_randomness) =
+            SumcheckSingle::run_initial_sumcheck_rounds_batched(
+                polynomial_a,
+                polynomial_b,
+                &statement,
+                combination_randomness_gen,
+                prover_state,
+                prover.folding_factor.at_round(0) + 1,
+                prover.starting_folding_pow_bits,
+            );
 
         Self {
             domain_size: prover.starting_domain_size(),
@@ -764,6 +821,36 @@ where
     );
 
     (combined_evals, combined_sum)
+}
+
+#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
+fn combine_statement_batched<EF>(
+    statement: &[Evaluation<EF>],
+    challenge: EF,
+) -> (Vec<EFPacking<EF>>, EF, EF)
+where
+    EF: ExtensionField<PF<EF>>,
+{
+    let num_variables = statement[0].num_variables();
+    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
+
+    let mut combined_evals =
+        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
+    let (combined_sum_a, combined_sum_b, _) = statement.iter().fold(
+        (EF::ZERO, EF::ZERO, EF::ONE),
+        |(mut acc_sum_a, mut acc_sum_b, gamma_pow), constraint| {
+            compute_sparse_eval_eq_packed::<EF>(&constraint.point, &mut combined_evals, gamma_pow);
+            if constraint.point[0] == EF::ZERO {
+                acc_sum_b += constraint.value * gamma_pow;
+            } else {
+                assert_eq!(constraint.point[0], EF::ONE);
+                acc_sum_a += constraint.value * gamma_pow;
+            }
+            (acc_sum_a, acc_sum_b, gamma_pow * challenge)
+        },
+    );
+
+    (combined_evals, combined_sum_a, combined_sum_b)
 }
 
 #[inline]
