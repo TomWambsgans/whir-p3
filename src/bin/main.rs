@@ -3,7 +3,7 @@ use std::time::Instant;
 use multilinear_toolkit::prelude::*;
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
-use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
+use p3_koala_bear::{default_koalabear_poseidon2_16, KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 // use tracing_forest::{ForestLayer, util::LevelFilter};
@@ -35,11 +35,7 @@ fn main() {
     //     .with(ForestLayer::default())
     //     .init();
 
-    let poseidon16 = Poseidon16::new_from_rng_128(&mut StdRng::seed_from_u64(0));
-    let poseidon24 = Poseidon24::new_from_rng_128(&mut StdRng::seed_from_u64(0));
-
-    let merkle_hash = MerkleHash::new(poseidon24);
-    let merkle_compress = MerkleCompress::new(poseidon16.clone());
+    let poseidon16 = default_koalabear_poseidon2_16();
 
     type BaseFieldA = F;
     type BaseFieldB = EF;
@@ -58,8 +54,6 @@ fn main() {
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
         folding_factor: FoldingFactor::new(7, 4),
-        merkle_hash: merkle_hash.clone(),
-        merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,

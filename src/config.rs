@@ -108,7 +108,7 @@ impl FoldingFactor {
 
 /// Configuration parameters for WHIR proofs.
 #[derive(Clone, Debug)]
-pub struct WhirConfigBuilder<H, C> {
+pub struct WhirConfigBuilder {
     /// The logarithmic inverse rate for sampling.
     pub starting_log_inv_rate: usize,
     pub max_num_variables_to_send_coeffs: usize,
@@ -126,8 +126,6 @@ pub struct WhirConfigBuilder<H, C> {
     pub security_level: usize,
     /// The number of bits required for proof-of-work (PoW).
     pub pow_bits: usize,
-    pub merkle_hash: H,
-    pub merkle_compress: C,
 }
 
 #[derive(Debug, Clone)]
@@ -144,7 +142,7 @@ pub struct RoundConfig<EF: Field> {
 }
 
 #[derive(Debug, Clone)]
-pub struct WhirConfig<EF: Field, Hash, C> {
+pub struct WhirConfig<EF: Field> {
     pub num_variables: usize,
     pub soundness_type: SecurityAssumption,
     pub security_level: usize,
@@ -163,21 +161,14 @@ pub struct WhirConfig<EF: Field, Hash, C> {
     pub final_log_inv_rate: usize,
     pub final_sumcheck_rounds: usize,
     pub final_folding_pow_bits: usize,
-
-    // Merkle tree parameters
-    pub merkle_hash: Hash,
-    pub merkle_compress: C,
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn second_batched_whir_config_builder<H, C>(
-    params_a: WhirConfigBuilder<H, C>,
+pub fn second_batched_whir_config_builder(
+    params_a: WhirConfigBuilder,
     num_variables_a: usize,
     num_variables_b: usize,
-) -> WhirConfigBuilder<H, C>
-where
-    H: Clone,
-    C: Clone,
+) -> WhirConfigBuilder
 {
     let var_diff = num_variables_a.checked_sub(num_variables_b).unwrap();
 
@@ -189,13 +180,13 @@ where
     params_b
 }
 
-impl<EF, H, C> WhirConfig<EF, H, C>
+impl<EF> WhirConfig<EF>
 where
     EF: Field,
     PF<EF>: TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(whir_parameters: WhirConfigBuilder<H, C>, num_variables: usize) -> Self {
+    pub fn new(whir_parameters: WhirConfigBuilder, num_variables: usize) -> Self {
         whir_parameters
             .folding_factor
             .check_validity(num_variables)
@@ -347,8 +338,6 @@ where
             final_sumcheck_rounds,
             final_folding_pow_bits: final_folding_pow_bits as usize,
             final_log_inv_rate: log_inv_rate,
-            merkle_hash: whir_parameters.merkle_hash,
-            merkle_compress: whir_parameters.merkle_compress,
         }
     }
 
@@ -560,7 +549,7 @@ where
     }
 }
 
-impl<EF, Hash, C> ToString for WhirConfig<EF, Hash, C>
+impl<EF> ToString for WhirConfig<EF>
 where
     EF: ExtensionField<PF<EF>>,
 {
@@ -597,7 +586,6 @@ where
     }
 }
 
-/// Security assumptions determines which proximity parameters and conjectures are assumed by the error computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityAssumption {
     /// Unique decoding assumes that the distance of each oracle is within the UDR of the code.

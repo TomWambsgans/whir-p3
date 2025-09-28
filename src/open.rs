@@ -5,7 +5,7 @@ use tracing::{info_span, instrument};
 
 use crate::{config::WhirConfig, *};
 
-impl<EF, H, C> WhirConfig<EF, H, C>
+impl<EF> WhirConfig<EF>
 where
     EF: ExtensionField<PF<EF>>,
     PF<EF>: TwoAdicField,
@@ -34,11 +34,7 @@ where
         witness: Witness<EF>,
         polynomial: &MleRef<'_, EF>,
     ) -> MultilinearPoint<EF>
-    where
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
-        // Validate parameters
         assert!(
             self.validate_parameters()
                 && self.validate_statement(&statement)
@@ -46,7 +42,6 @@ where
             "Invalid prover parameters, statement, or witness"
         );
 
-        // Initialize the round state with inputs and initial polynomial data
         let mut round_state = RoundState::initialize_first_round_state(
             self,
             prover_state,
@@ -56,18 +51,11 @@ where
         )
         .unwrap();
 
-        // Run the WHIR protocol round-by-round
         for round in 0..=self.n_rounds() {
             self.round(round, prover_state, &mut round_state).unwrap();
         }
 
-        // Reverse the vector of verifier challenges (used as evaluation point)
-        //
-        // These challenges were pushed in round order; we reverse them to use as a single
-        // evaluation point for final statement consistency checks.
-        let constraint_eval = MultilinearPoint(round_state.randomness_vec);
-
-        constraint_eval
+        MultilinearPoint(round_state.randomness_vec)
     }
 
     #[instrument(name = "WHIR batch prove", skip_all)]
@@ -82,8 +70,6 @@ where
         polynomial_b: &MleRef<'_, EF>,
     ) -> MultilinearPoint<EF>
     where
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
         PF<EF>: TwoAdicField,
     {
         // (1 - X).PolB + X.PolA
@@ -114,9 +100,6 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()>
-    where
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables = self.num_variables - self.folding_factor.total_number(round_index);
@@ -143,11 +126,7 @@ where
             )
         });
 
-        let (prover_data, root) = MerkleData::build(
-            self.merkle_hash.clone(),
-            self.merkle_compress.clone(),
-            folded_matrix,
-        );
+        let (prover_data, root) = MerkleData::build(folded_matrix);
 
         prover_state.add_base_scalars(&root);
 
@@ -182,11 +161,8 @@ where
                     {
                         let mut merkle_proofs = Vec::new();
                         for challenge in &stir_challenges_indexes {
-                            let (answer, proof) = round_state.commitment_merkle_prover_data_a.open(
-                                *challenge,
-                                self.merkle_hash.clone(),
-                                self.merkle_compress.clone(),
-                            );
+                            let (answer, proof) =
+                                round_state.commitment_merkle_prover_data_a.open(*challenge);
                             answers_a.push(answer);
                             merkle_proofs.push(proof);
                         }
@@ -218,11 +194,7 @@ where
                                 .commitment_merkle_prover_data_b
                                 .as_ref()
                                 .unwrap()
-                                .open(
-                                    *challenge,
-                                    self.merkle_hash.clone(),
-                                    self.merkle_compress.clone(),
-                                );
+                                .open(*challenge);
                             answers_b.push(answer);
                             merkle_proofs.push(proof);
                         }
@@ -273,11 +245,8 @@ where
                         Vec::<MleOwned<EF>>::with_capacity(stir_challenges_indexes.len());
                     let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                     for challenge in &stir_challenges_indexes {
-                        let (answer, proof) = round_state.commitment_merkle_prover_data_a.open(
-                            *challenge,
-                            self.merkle_hash.clone(),
-                            self.merkle_compress.clone(),
-                        );
+                        let (answer, proof) =
+                            round_state.commitment_merkle_prover_data_a.open(*challenge);
                         answers.push(answer);
                         merkle_proofs.push(proof);
                     }
@@ -316,11 +285,7 @@ where
                 let mut answers = Vec::with_capacity(stir_challenges_indexes.len());
                 let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
                 for challenge in &stir_challenges_indexes {
-                    let (answer, proof) = data.open(
-                        *challenge,
-                        self.merkle_hash.clone(),
-                        self.merkle_compress.clone(),
-                    );
+                    let (answer, proof) = data.open(*challenge);
                     answers.push(answer);
                     merkle_proofs.push(proof);
                 }
@@ -407,9 +372,6 @@ where
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()>
-    where
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(&unpack_extension(
@@ -440,11 +402,7 @@ where
             let mut merkle_proofs = Vec::with_capacity(final_challenge_indexes.len());
 
             for challenge in final_challenge_indexes {
-                let (answer, proof) = prev_merkle_data.open(
-                    challenge,
-                    self.merkle_hash.clone(),
-                    self.merkle_compress.clone(),
-                );
+                let (answer, proof) = prev_merkle_data.open(challenge);
                 answers.push(answer);
                 merkle_proofs.push(proof);
             }
@@ -736,8 +694,8 @@ where
     EF: ExtensionField<PF<EF>>,
     PF<EF>: TwoAdicField,
 {
-    pub(crate) fn initialize_first_round_state<MyChallenger, C>(
-        prover: &WhirConfig<EF, MyChallenger, C>,
+    pub(crate) fn initialize_first_round_state(
+        prover: &WhirConfig<EF>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         mut statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
@@ -789,8 +747,8 @@ where
         })
     }
 
-    pub(crate) fn initialize_first_round_state_batch<MyChallenger, C>(
-        prover: &WhirConfig<EF, MyChallenger, C>,
+    pub(crate) fn initialize_first_round_state_batch(
+        prover: &WhirConfig<EF>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<EF>,

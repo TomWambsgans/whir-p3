@@ -1,10 +1,8 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use multilinear_toolkit::prelude::*;
-use p3_commit::{BatchOpeningRef, ExtensionMmcs, Mmcs};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, TwoAdicField};
 use p3_matrix::Dimensions;
-use p3_merkle_tree::MerkleTreeMmcs;
 
 use crate::*;
 
@@ -62,7 +60,7 @@ impl<F: Field, EF: ExtensionField<F>> ParsedCommitment<F, EF> {
     }
 }
 
-impl<'a, EF, H, C> WhirConfig<EF, H, C>
+impl<'a, EF> WhirConfig<EF>
 where
     EF: TwoAdicField + ExtensionField<PF<EF>>,
 {
@@ -81,7 +79,7 @@ where
     }
 }
 
-impl<'a, EF, H, C> WhirConfig<EF, H, C>
+impl<'a, EF> WhirConfig<EF>
 where
     EF: TwoAdicField + ExtensionField<PF<EF>>,
     PF<EF>: TwoAdicField,
@@ -98,8 +96,6 @@ where
     where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
         assert!(
             statement_a
@@ -267,8 +263,6 @@ where
     where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
         assert!(
             statement
@@ -442,8 +436,6 @@ where
     where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
         let leafs_base_field = round_index == 0;
 
@@ -505,8 +497,6 @@ where
     where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
         let leafs_base_field = round_index == 0;
 
@@ -602,16 +592,7 @@ where
     where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
-        H: MerkleHasher<EF>,
-        C: MerkleCompress<EF>,
     {
-        let mmcs = MerkleTreeMmcs::<PF<EF>, PF<EF>, H, C, DIGEST_ELEMS>::new(
-            self.merkle_hash.clone(),
-            self.merkle_compress.clone(),
-        );
-        let extension_mmcs_f = ExtensionMmcs::<PF<EF>, F, _>::new(mmcs.clone());
-        let extension_mmcs_ef = ExtensionMmcs::<PF<EF>, EF, _>::new(mmcs.clone());
-
         // Branch depending on whether the committed leafs are base field or extension field.
         let res = if leafs_base_field {
             // Merkle leaves
@@ -642,17 +623,16 @@ where
             // For each queried index:
             for (i, &index) in indices.iter().enumerate() {
                 // Verify the Merkle opening for the claimed leaf against the Merkle root.
-                extension_mmcs_f
-                    .verify_batch(
-                        &root.clone().into(),
-                        dimensions,
-                        index,
-                        BatchOpeningRef {
-                            opened_values: &[answers[i].clone()],
-                            opening_proof: &merkle_proofs[i],
-                        },
-                    )
-                    .map_err(|_| ProofError::InvalidProof)?;
+                if !merkle_verify::<PF<EF>, F>(
+                    *root,
+                    index,
+                    dimensions[0],
+                    answers[i].clone(),
+                    &merkle_proofs[i],
+                ) {
+                    return Err(ProofError::InvalidProof);
+                }
+               
             }
 
             // Convert the base field values to EF and collect them into a result vector.
@@ -689,17 +669,15 @@ where
             // For each queried index:
             for (i, &index) in indices.iter().enumerate() {
                 // Verify the Merkle opening against the extension MMCS.
-                extension_mmcs_ef
-                    .verify_batch(
-                        &root.clone().into(),
-                        dimensions,
-                        index,
-                        BatchOpeningRef {
-                            opened_values: &[answers[i].clone()],
-                            opening_proof: &merkle_proofs[i],
-                        },
-                    )
-                    .map_err(|_| ProofError::InvalidProof)?;
+                if !merkle_verify::<PF<EF>, EF>(
+                    *root,
+                    index,
+                    dimensions[0],
+                    answers[i].clone(),
+                    &merkle_proofs[i],
+                ) {
+                    return Err(ProofError::InvalidProof);
+                }
             }
 
             // Return the extension field answers as-is.

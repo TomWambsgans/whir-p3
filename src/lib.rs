@@ -13,9 +13,10 @@ pub use dft::*;
 mod config;
 pub use config::*;
 
-mod utils;
-pub(crate) use utils::*;
-pub use utils::precompute_dft_twiddles;
+mod merkle;
+pub use merkle::DIGEST_ELEMS;
+pub(crate) use merkle::*;
 
-mod wrappers;
-pub use wrappers::*;
+mod utils;
+pub use utils::precompute_dft_twiddles;
+pub(crate) use utils::*;

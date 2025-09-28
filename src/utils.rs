@@ -1,12 +1,11 @@
 use multilinear_toolkit::prelude::*;
 use p3_field::Field;
+use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_util::log2_strict_usize;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-
-use p3_field::TwoAdicField;
 
 use crate::EvalsDft;
 
