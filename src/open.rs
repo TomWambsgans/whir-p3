@@ -33,8 +33,7 @@ where
         statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
         polynomial: &MleRef<'_, EF>,
-    ) -> MultilinearPoint<EF>
-    {
+    ) -> MultilinearPoint<EF> {
         assert!(
             self.validate_parameters()
                 && self.validate_statement(&statement)
@@ -85,8 +84,7 @@ where
             statement_b,
             witness_b,
             polynomial_b,
-        )
-        .unwrap();
+        );
 
         for round in 0..=self.n_rounds() {
             self.round(round, prover_state, &mut round_state).unwrap();
@@ -99,8 +97,7 @@ where
         round_index: usize,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<EF>,
-    ) -> ProofResult<()>
-    {
+    ) -> ProofResult<()> {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
         let num_variables = self.num_variables - self.folding_factor.total_number(round_index);
 
@@ -150,6 +147,11 @@ where
                 &ood_points,
                 round_index,
             )?;
+
+        let folding_randomness = round_state.folding_randomness(
+            self.folding_factor.at_round(round_index)
+                + (round_state.commitment_merkle_prover_data_b.is_some() && round_index == 0) as usize,
+        );
 
         // Collect Merkle proofs for stir queries
         let stir_evaluations = match &round_state.merkle_prover_data {
@@ -219,19 +221,16 @@ where
                             }
                         }
                     }
-
                     let mut stir_evaluations = Vec::new();
                     for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
                         let vars_a = answer_a.by_ref().n_vars();
                         let vars_b = answer_b.by_ref().n_vars();
-                        let a_trunc = round_state.folding_randomness[1..].to_vec();
+                        let a_trunc = folding_randomness[1..].to_vec();
                         let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
-                        let b_trunc =
-                            round_state.folding_randomness[vars_a - vars_b + 1..].to_vec();
+                        let b_trunc = folding_randomness[vars_a - vars_b + 1..].to_vec();
                         let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
-                        let last_fold_rand_a = round_state.folding_randomness[0];
-                        let last_fold_rand_b = round_state.folding_randomness
-                            [..vars_a - vars_b + 1]
+                        let last_fold_rand_a = folding_randomness[0];
+                        let last_fold_rand_b = folding_randomness[..vars_a - vars_b + 1]
                             .iter()
                             .map(|&x| EF::ONE - x)
                             .product::<EF>();
@@ -274,7 +273,7 @@ where
                     // Evaluate answers in the folding randomness.
                     let mut stir_evaluations = Vec::with_capacity(answers.len());
                     for answer in &answers {
-                        stir_evaluations.push(answer.evaluate(&round_state.folding_randomness));
+                        stir_evaluations.push(answer.evaluate(&folding_randomness));
                     }
 
                     stir_evaluations
@@ -313,7 +312,7 @@ where
                 // Evaluate answers in the folding randomness.
                 let mut stir_evaluations = Vec::with_capacity(answers.len());
                 for answer in &answers {
-                    stir_evaluations.push(answer.evaluate(&round_state.folding_randomness));
+                    stir_evaluations.push(answer.evaluate(&folding_randomness));
                 }
 
                 stir_evaluations
@@ -342,25 +341,20 @@ where
             &stir_combination_randomness,
         );
 
-        let folding_randomness = round_state.sumcheck_prover.run_sumcheck_many_rounds(
+        let next_folding_randomness = round_state.sumcheck_prover.run_sumcheck_many_rounds(
             prover_state,
             folding_factor_next,
             round_params.folding_pow_bits,
         );
 
-        let start_idx = self.folding_factor.total_number(round_index);
-        let dst_randomness =
-            &mut round_state.randomness_vec[start_idx..][..folding_randomness.len()];
-
-        for (dst, src) in dst_randomness.iter_mut().zip(folding_randomness.iter()) {
-            *dst = *src;
-        }
+        round_state
+            .randomness_vec
+            .extend_from_slice(&next_folding_randomness.0);
 
         // Update round state
         round_state.domain_size = new_domain_size;
         round_state.next_domain_gen =
             PF::<EF>::two_adic_generator(log2_strict_usize(new_domain_size) - folding_factor_next);
-        round_state.folding_randomness = folding_randomness;
         round_state.merkle_prover_data = Some(prover_data);
 
         Ok(())
@@ -371,8 +365,7 @@ where
         round_index: usize,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         round_state: &mut RoundState<EF>,
-    ) -> ProofResult<()>
-    {
+    ) -> ProofResult<()> {
         // Directly send coefficients of the polynomial to the verifier.
         prover_state.add_extension_scalars(&unpack_extension(
             &round_state
@@ -435,13 +428,10 @@ where
                 self.final_sumcheck_rounds,
                 self.final_folding_pow_bits,
             );
-            let start_idx = self.folding_factor.total_number(round_index);
-            let rand_dst = &mut round_state.randomness_vec
-                [start_idx..start_idx + final_folding_randomness.len()];
 
-            for (dst, src) in rand_dst.iter_mut().zip(final_folding_randomness.iter()) {
-                *dst = *src;
-            }
+            round_state
+                .randomness_vec
+                .extend(final_folding_randomness.0);
         }
 
         Ok(())
@@ -669,23 +659,14 @@ pub(crate) struct RoundState<EF>
 where
     EF: ExtensionField<PF<EF>>,
 {
-    pub(crate) domain_size: usize,
-
-    pub(crate) next_domain_gen: PF<EF>,
-
-    pub(crate) sumcheck_prover: SumcheckSingle<EF>,
-
-    pub(crate) folding_randomness: MultilinearPoint<EF>,
-
-    pub(crate) commitment_merkle_prover_data_a: MerkleData<EF>,
-
-    pub(crate) commitment_merkle_prover_data_b: Option<MerkleData<EF>>,
-
-    pub(crate) merkle_prover_data: Option<MerkleData<EF>>,
-
-    pub(crate) randomness_vec: Vec<EF>,
-
-    pub(crate) statement: Vec<Evaluation<EF>>,
+    domain_size: usize,
+    next_domain_gen: PF<EF>,
+    sumcheck_prover: SumcheckSingle<EF>,
+    commitment_merkle_prover_data_a: MerkleData<EF>,
+    commitment_merkle_prover_data_b: Option<MerkleData<EF>>,
+    merkle_prover_data: Option<MerkleData<EF>>,
+    randomness_vec: Vec<EF>,
+    statement: Vec<Evaluation<EF>>,
 }
 
 #[allow(clippy::mismatching_type_param_order)]
@@ -725,12 +706,6 @@ where
             prover.starting_folding_pow_bits,
         );
 
-        let randomness_vec = {
-            let mut randomness_vec = folding_randomness.0.clone();
-            randomness_vec.resize(prover.num_variables, EF::ZERO);
-            randomness_vec
-        };
-
         Ok(Self {
             domain_size: prover.starting_domain_size(),
             next_domain_gen: PF::<EF>::two_adic_generator(
@@ -738,11 +713,10 @@ where
                     - prover.folding_factor.at_round(0),
             ),
             sumcheck_prover,
-            folding_randomness,
             merkle_prover_data: None,
             commitment_merkle_prover_data_a: witness.prover_data,
             commitment_merkle_prover_data_b: None,
-            randomness_vec,
+            randomness_vec: folding_randomness.0.clone(),
             statement,
         })
     }
@@ -756,7 +730,7 @@ where
         statement_b: Vec<Evaluation<EF>>,
         witness_b: Witness<EF>,
         polynomial_b: &MleRef<'_, EF>,
-    ) -> ProofResult<Self> {
+    ) -> Self {
         let n_vars_a = statement_a[0].num_variables();
         let n_vars_b = statement_b[0].num_variables();
 
@@ -821,26 +795,23 @@ where
             prover.starting_folding_pow_bits,
         );
 
-        let randomness_vec = {
-            let mut randomness_vec = folding_randomness.0.clone();
-            randomness_vec.resize(prover.num_variables, EF::ZERO);
-            randomness_vec
-        };
-
-        Ok(Self {
+        Self {
             domain_size: prover.starting_domain_size(),
             next_domain_gen: PF::<EF>::two_adic_generator(
                 log2_strict_usize(prover.starting_domain_size())
                     - prover.folding_factor.at_round(0),
             ),
             sumcheck_prover,
-            folding_randomness,
             merkle_prover_data: None,
             commitment_merkle_prover_data_a: witness_a.prover_data,
             commitment_merkle_prover_data_b: Some(witness_b.prover_data),
-            randomness_vec,
+            randomness_vec: folding_randomness.0.clone(),
             statement,
-        })
+        }
+    }
+
+    fn folding_randomness(&self, folding_factor: usize) -> MultilinearPoint<EF> {
+        MultilinearPoint(self.randomness_vec[self.randomness_vec.len() - folding_factor..].to_vec())
     }
 }
 

@@ -108,14 +108,10 @@ fn main() {
         statement_b.push(Evaluation::new(point_b.clone(), eval));
     }
 
-    // Define the Fiat-Shamir domain separator pattern for committing and proving
 
     let challenger = MyChallenger::new(poseidon16);
 
-    // Initialize the Merlin transcript from the IOPattern
     let mut prover_state = ProverState::new(challenger.clone());
-
-    // Commit to the polynomial and produce a witness
 
     precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
@@ -156,10 +152,8 @@ fn main() {
         prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0
             - proof_size_single;
 
-    // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
-    // Parse the commitment
     let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
     let parsed_commitment_b = params_b
         .parse_commitment::<EF>(&mut verifier_state)

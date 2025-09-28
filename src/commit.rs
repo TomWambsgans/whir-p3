@@ -1,5 +1,3 @@
-use std::hash::{Hash, Hasher};
-
 use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, TwoAdicField};
 use tracing::instrument;
@@ -46,11 +44,8 @@ pub struct Witness<EF>
 where
     EF: ExtensionField<PF<EF>>,
 {
-    /// Prover data of the Merkle tree.  
     pub prover_data: MerkleData<EF>,
-    /// Out-of-domain challenge points used for polynomial verification.  
     pub ood_points: Vec<EF>,
-    /// The corresponding polynomial evaluations at the OOD challenge points.  
     pub ood_answers: Vec<EF>,
 }
 
@@ -59,22 +54,12 @@ where
     EF: ExtensionField<PF<EF>>,
     PF<EF>: TwoAdicField,
 {
-    /// Commits a polynomial using a Merkle-based commitment scheme.
-    ///
-    /// This function:
-    /// - Expands polynomial coefficients to evaluations.
-    /// - Applies folding and restructuring optimizations.
-    /// - Converts evaluations to an extension field.
-    /// - Constructs a Merkle tree from the evaluations.
-    /// - Computes out-of-domain (OOD) challenge points and their evaluations.
-    /// - Returns a `Witness` containing the commitment data.
     #[instrument(skip_all)]
     pub fn commit(
         &self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         polynomial: &MleOwned<EF>,
     ) -> Witness<EF> {
-        // Perform DFT on the padded evaluations matrix
         let folded_matrix = reorder_and_dft(
             &polynomial.by_ref(),
             self.folding_factor.at_round(0),
@@ -85,7 +70,6 @@ where
 
         prover_state.add_base_scalars(&root);
 
-        // Handle OOD (Out-Of-Domain) samples
         let (ood_points, ood_answers) = sample_ood_points::<EF, _>(
             prover_state,
             self.committment_ood_samples,
@@ -93,7 +77,6 @@ where
             |point| polynomial.evaluate(point),
         );
 
-        // Return the witness containing the polynomial, Merkle tree, and OOD results.
         Witness {
             prover_data,
             ood_points,
@@ -102,9 +85,3 @@ where
     }
 }
 
-fn hash<A: Hash>(a: &A) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    let mut hasher = DefaultHasher::new();
-    a.hash(&mut hasher);
-    hasher.finish()
-}
