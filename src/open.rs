@@ -149,129 +149,50 @@ where
 
         let folding_randomness = round_state.folding_randomness(
             self.folding_factor.at_round(round_index)
-                + (round_state.commitment_merkle_prover_data_b.is_some() && round_index == 0)
-                    as usize,
+                + round_state.commitment_merkle_prover_data_b.is_some() as usize,
         );
 
-        let stir_evaluations =
-            if round_state.commitment_merkle_prover_data_b.is_some() && round_index == 0 {
-                let mut answers_a = Vec::<MleOwned<EF>>::new();
-                let mut answers_b = Vec::<MleOwned<EF>>::new();
+        let stir_evaluations = if round_state.commitment_merkle_prover_data_b.is_some() {
+            let answers_a = open_merkle_tree_at_challenges(
+                &round_state.merkle_prover_data,
+                prover_state,
+                &stir_challenges_indexes,
+            );
+            let answers_b = open_merkle_tree_at_challenges(
+                round_state
+                    .commitment_merkle_prover_data_b
+                    .as_ref()
+                    .unwrap(),
+                prover_state,
+                &stir_challenges_indexes,
+            );
+            let mut stir_evaluations = Vec::new();
+            for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
+                let vars_a = answer_a.by_ref().n_vars();
+                let vars_b = answer_b.by_ref().n_vars();
+                let a_trunc = folding_randomness[1..].to_vec();
+                let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
+                let b_trunc = folding_randomness[vars_a - vars_b + 1..].to_vec();
+                let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
+                let last_fold_rand_a = folding_randomness[0];
+                let last_fold_rand_b = folding_randomness[..vars_a - vars_b + 1]
+                    .iter()
+                    .map(|&x| EF::ONE - x)
+                    .product::<EF>();
+                stir_evaluations.push(eval_a * last_fold_rand_a + eval_b * last_fold_rand_b);
+            }
 
-                {
-                    let mut merkle_proofs = Vec::new();
-                    for challenge in &stir_challenges_indexes {
-                        let (answer, proof) = round_state.merkle_prover_data.open(*challenge);
-                        answers_a.push(answer);
-                        merkle_proofs.push(proof);
-                    }
-
-                    // merkle leaves
-                    for answer in &answers_a {
-                        match answer {
-                            MleOwned::Base(answer) => {
-                                prover_state.hint_base_scalars(answer);
-                            }
-                            MleOwned::Extension(answer) => {
-                                prover_state.hint_extension_scalars(answer);
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-
-                    // merkle authentication proof
-                    for merkle_proof in &merkle_proofs {
-                        for digest in merkle_proof {
-                            prover_state.hint_base_scalars(digest);
-                        }
-                    }
-                }
-                {
-                    let mut merkle_proofs = Vec::new();
-                    for challenge in &stir_challenges_indexes {
-                        let (answer, proof) = round_state
-                            .commitment_merkle_prover_data_b
-                            .as_ref()
-                            .unwrap()
-                            .open(*challenge);
-                        answers_b.push(answer);
-                        merkle_proofs.push(proof);
-                    }
-
-                    // merkle leaves
-                    for answer in &answers_b {
-                        match answer {
-                            MleOwned::Base(answer) => {
-                                prover_state.hint_base_scalars(answer);
-                            }
-                            MleOwned::Extension(answer) => {
-                                prover_state.hint_extension_scalars(answer);
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-
-                    // merkle authentication proof
-                    for merkle_proof in &merkle_proofs {
-                        for digest in merkle_proof {
-                            prover_state.hint_base_scalars(digest);
-                        }
-                    }
-                }
-                let mut stir_evaluations = Vec::new();
-                for (answer_a, answer_b) in answers_a.iter().zip(&answers_b) {
-                    let vars_a = answer_a.by_ref().n_vars();
-                    let vars_b = answer_b.by_ref().n_vars();
-                    let a_trunc = folding_randomness[1..].to_vec();
-                    let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
-                    let b_trunc = folding_randomness[vars_a - vars_b + 1..].to_vec();
-                    let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
-                    let last_fold_rand_a = folding_randomness[0];
-                    let last_fold_rand_b = folding_randomness[..vars_a - vars_b + 1]
-                        .iter()
-                        .map(|&x| EF::ONE - x)
-                        .product::<EF>();
-                    stir_evaluations.push(eval_a * last_fold_rand_a + eval_b * last_fold_rand_b);
-                }
-
-                stir_evaluations
-            } else {
-                let mut answers = Vec::<MleOwned<EF>>::with_capacity(stir_challenges_indexes.len());
-                let mut merkle_proofs = Vec::with_capacity(stir_challenges_indexes.len());
-                for challenge in &stir_challenges_indexes {
-                    let (answer, proof) = round_state.merkle_prover_data.open(*challenge);
-                    answers.push(answer);
-                    merkle_proofs.push(proof);
-                }
-
-                // merkle leaves
-                for answer in &answers {
-                    match answer {
-                        MleOwned::Base(answer) => {
-                            prover_state.hint_base_scalars(answer);
-                        }
-                        MleOwned::Extension(answer) => {
-                            prover_state.hint_extension_scalars(answer);
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-
-                // merkle authentication proof
-                for merkle_proof in &merkle_proofs {
-                    for digest in merkle_proof {
-                        prover_state.hint_base_scalars(digest);
-                    }
-                }
-
-                // Evaluate answers in the folding randomness.
-                let mut stir_evaluations = Vec::with_capacity(answers.len());
-                for answer in &answers {
-                    stir_evaluations.push(answer.evaluate(&folding_randomness));
-                }
-
-                stir_evaluations
-            };
+            stir_evaluations
+        } else {
+            open_merkle_tree_at_challenges(
+                &round_state.merkle_prover_data,
+                prover_state,
+                &stir_challenges_indexes,
+            )
+            .iter()
+            .map(|answer| answer.evaluate(&folding_randomness))
+            .collect()
+        };
 
         // Randomness for combination
         let combination_randomness_gen: EF = prover_state.sample();
@@ -310,6 +231,7 @@ where
         round_state.next_domain_gen =
             PF::<EF>::two_adic_generator(log2_strict_usize(new_domain_size) - folding_factor_next);
         round_state.merkle_prover_data = prover_data;
+        round_state.commitment_merkle_prover_data_b = None;
 
         Ok(())
     }
@@ -423,6 +345,42 @@ where
 
         Ok((ood_challenges, stir_challenges, stir_challenges_indexes))
     }
+}
+
+fn open_merkle_tree_at_challenges<EF: ExtensionField<PF<EF>>>(
+    merkle_tree: &MerkleData<EF>,
+    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+    stir_challenges_indexes: &[usize],
+) -> Vec<MleOwned<EF>> {
+    let mut merkle_proofs = Vec::new();
+    let mut answers = Vec::new();
+    for challenge in stir_challenges_indexes {
+        let (answer, proof) = merkle_tree.open(*challenge);
+        answers.push(answer);
+        merkle_proofs.push(proof);
+    }
+
+    // merkle leaves
+    for answer in &answers {
+        match answer {
+            MleOwned::Base(answer) => {
+                prover_state.hint_base_scalars(answer);
+            }
+            MleOwned::Extension(answer) => {
+                prover_state.hint_extension_scalars(answer);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // merkle authentication proof
+    for merkle_proof in &merkle_proofs {
+        for digest in merkle_proof {
+            prover_state.hint_base_scalars(digest);
+        }
+    }
+
+    answers
 }
 
 #[derive(Debug, Clone)]
