@@ -1,21 +1,16 @@
 use std::time::Instant;
 
+use multilinear_toolkit::prelude::*;
 use p3_challenger::DuplexChallenger;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
-use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB};
+use p3_koala_bear::{
+    KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB, default_koalabear_poseidon2_16,
+};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
-use tracing_forest::{ForestLayer, util::LevelFilter};
-use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
-use whir_p3::{
-    dft::EvalsDft,
-    fiat_shamir::{prover::ProverState, verifier::VerifierState},
-    poly::{
-        evals::EvaluationsList,
-        multilinear::{Evaluation, MultilinearPoint},
-    },
-    whir::config::*,
-};
+// use tracing_forest::{ForestLayer, util::LevelFilter};
+// use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use whir_p3::*;
 
 // Commit A in F, B in EF
 // TODO there is a big overhead embedding overhead in the sumcheck
@@ -33,21 +28,16 @@ type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 comp
 type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
+    // let env_filter: EnvFilter = EnvFilter::builder()
+    //     .with_default_directive(LevelFilter::INFO.into())
+    //     .from_env_lossy();
 
-    Registry::default()
-        .with(env_filter)
-        .with(ForestLayer::default())
-        .init();
+    // Registry::default()
+    //     .with(env_filter)
+    //     .with(ForestLayer::default())
+    //     .init();
 
-    // Create hash and compression functions for the Merkle tree
-    let poseidon16 = Poseidon16::new_from_rng_128(&mut StdRng::seed_from_u64(0));
-    let poseidon24 = Poseidon24::new_from_rng_128(&mut StdRng::seed_from_u64(0));
-
-    let merkle_hash = MerkleHash::new(poseidon24);
-    let merkle_compress = MerkleCompress::new(poseidon16.clone());
+    let poseidon16 = default_koalabear_poseidon2_16();
 
     type BaseFieldA = F;
     type BaseFieldB = EF;
@@ -66,18 +56,12 @@ fn main() {
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
         folding_factor: FoldingFactor::new(7, 4),
-        merkle_hash: merkle_hash.clone(),
-        merkle_compress: merkle_compress.clone(),
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,
     };
-
-    let params_b = second_batched_whir_config_builder::<BaseFieldB, EF, _, _, _>(
-        params_a.clone(),
-        num_variables_a,
-        num_variables_b,
-    );
+    let params_b =
+        second_batched_whir_config_builder(params_a.clone(), num_variables_a, num_variables_b);
     let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
     let params_b = WhirConfig::new(params_b, num_variables_b);
 
@@ -97,10 +81,6 @@ fn main() {
             .collect::<Vec<EF>>();
         let initial_booleans = rng.random_range(0..num_variables / 4);
         for i in 0..initial_booleans {
-            point[i] = EF::from_usize(rng.random_range(0..2));
-        }
-        let final_booleans = rng.random_range(0..num_variables / 4);
-        for i in (num_variables - final_booleans)..num_variables {
             point[i] = EF::from_usize(rng.random_range(0..2));
         }
         MultilinearPoint(point)
@@ -130,49 +110,62 @@ fn main() {
         statement_b.push(Evaluation::new(point_b.clone(), eval));
     }
 
-    // Define the Fiat-Shamir domain separator pattern for committing and proving
-
     let challenger = MyChallenger::new(poseidon16);
 
-    // Initialize the Merlin transcript from the IOPattern
     let mut prover_state = ProverState::new(challenger.clone());
 
-    // Commit to the polynomial and produce a witness
+    precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
-    let dft = EvalsDft::<EFPrimeSubfield>::new(1 << params_a.max_fft_size());
-
+    let polynomial_a = MleOwned::Base(polynomial_a);
+    let polynomial_b = MleOwned::ExtensionPacked(pack_extension(&polynomial_b));
     let time = Instant::now();
-    let witness_a = params_a.commit(&dft, &mut prover_state, &polynomial_a);
+    let witness_a = params_a.commit(&mut prover_state, &polynomial_a);
     let commit_time_a = time.elapsed();
 
     let time = Instant::now();
-    let witness_b = params_b.commit(&dft, &mut prover_state, &polynomial_b);
+    let witness_b = params_b.commit(&mut prover_state, &polynomial_b);
     let commit_time_b = time.elapsed();
 
-    // Generate a proof for the given statement and witness
+    let witness_a_clone = witness_a.clone();
+    let time = Instant::now();
+    params_a.prove(
+        &mut prover_state,
+        statement_a.clone(),
+        witness_a_clone,
+        &polynomial_a.by_ref(),
+    );
+    let opening_time_single = time.elapsed();
+    let proof_size_single =
+        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
+
     let time = Instant::now();
     params_a.batch_prove(
-        &dft,
         &mut prover_state,
         statement_a.clone(),
         witness_a,
-        &polynomial_a,
+        &polynomial_a.by_ref(),
         statement_b.clone(),
         witness_b,
-        &polynomial_b,
+        &polynomial_b.by_ref(),
     );
+    let opening_time_batch = time.elapsed();
+    let proof_size_batch =
+        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0
+            - proof_size_single;
 
-    let opening_time = time.elapsed();
-
-    // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
     let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
 
-    // Parse the commitment
-    let parsed_commitment_a = params_a
-        .parse_commitment(&mut verifier_state)
-        .unwrap();
+    let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
     let parsed_commitment_b = params_b
-        .parse_commitment(&mut verifier_state)
+        .parse_commitment::<EF>(&mut verifier_state)
+        .unwrap();
+
+    params_a
+        .verify::<F>(
+            &mut verifier_state,
+            &parsed_commitment_a,
+            statement_a.clone(),
+        )
         .unwrap();
 
     let verif_time = Instant::now();
@@ -188,14 +181,24 @@ fn main() {
     let verify_time = verif_time.elapsed();
 
     println!(
-        "\nProving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",
-        commit_time_a.as_millis() + commit_time_b.as_millis() + opening_time.as_millis(),
+        "\nSingle proving time: {} ms (commit: {} ms, opening: {} ms)",
+        commit_time_a.as_millis() + opening_time_single.as_millis(),
+        commit_time_a.as_millis(),
+        opening_time_single.as_millis()
+    );
+
+    println!(
+        "\nBatch proving time: {} ms (commit A: {} ms, commit B: {} ms, opening: {} ms)",
+        commit_time_a.as_millis() + commit_time_b.as_millis() + opening_time_batch.as_millis(),
         commit_time_a.as_millis(),
         commit_time_b.as_millis(),
-        opening_time.as_millis()
+        opening_time_batch.as_millis()
     );
-    let proof_size =
-        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
-    println!("proof size: {:.2} KiB", proof_size / 1024.0);
-    println!("Verification time: {} μs", verify_time.as_micros());
+
+    println!("proof size single: {:.2} KiB", proof_size_single / 1024.0);
+    println!("proof size batch: {:.2} KiB", proof_size_batch / 1024.0);
+    println!(
+        "Verification time: {:.2} ms",
+        verify_time.as_micros() as f64 / 1000.
+    );
 }

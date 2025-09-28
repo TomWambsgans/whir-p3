@@ -36,7 +36,6 @@ suboptimal_flops = "allow"
 cast_sign_loss = "allow"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
 rayon = { version = "1.0" }
 p3-field = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "lean-multisig" }
 p3-koala-bear = { git = "https://github.com/TomWambsgans/Plonky3.git", branch = "lean-multisig" }
@@ -64,10 +63,12 @@ tracing-subscriber = { version = "0.3.17", default-features = false, features = 
     "env-filter",
 ] }
 rand = "0.9.2"
-clap = { version = "4.4.17", features = ["derive"] }
+multilinear-toolkit = { git = "https://github.com/leanEthereum/multilinear-toolkit.git" }
+# multilinear-toolkit = { path = "../../multilinear-toolkit" }
+
 
 [dev-dependencies]
-criterion = "0.6"
+criterion = "0.7.0"
 proptest = "1.0"
 
 [profile.profiling]

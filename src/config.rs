@@ -1,7 +1,7 @@
-use std::{f64::consts::LOG2_10, fmt::Display, marker::PhantomData, str::FromStr};
+use std::{f64::consts::LOG2_10, fmt::Display, str::FromStr};
 
+use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, Field, TwoAdicField};
-use serde::Serialize;
 use thiserror::Error;
 
 pub const DEFAULT_MAX_POW: usize = 17;
@@ -108,7 +108,7 @@ impl FoldingFactor {
 
 /// Configuration parameters for WHIR proofs.
 #[derive(Clone, Debug)]
-pub struct WhirConfigBuilder<H, C, const DIGEST_ELEMS: usize> {
+pub struct WhirConfigBuilder {
     /// The logarithmic inverse rate for sampling.
     pub starting_log_inv_rate: usize,
     pub max_num_variables_to_send_coeffs: usize,
@@ -126,12 +126,10 @@ pub struct WhirConfigBuilder<H, C, const DIGEST_ELEMS: usize> {
     pub security_level: usize,
     /// The number of bits required for proof-of-work (PoW).
     pub pow_bits: usize,
-    pub merkle_hash: H,
-    pub merkle_compress: C,
 }
 
 #[derive(Debug, Clone)]
-pub struct RoundConfig<F> {
+pub struct RoundConfig<EF: Field> {
     pub pow_bits: usize,
     pub folding_pow_bits: usize,
     pub num_queries: usize,
@@ -140,15 +138,11 @@ pub struct RoundConfig<F> {
     pub num_variables: usize,
     pub folding_factor: usize,
     pub domain_size: usize,
-    pub folded_domain_gen: F,
+    pub folded_domain_gen: PF<EF>,
 }
 
 #[derive(Debug, Clone)]
-pub struct WhirConfig<F, EF, Hash, C, const DIGEST_ELEMS: usize>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
+pub struct WhirConfig<EF: Field> {
     pub num_variables: usize,
     pub soundness_type: SecurityAssumption,
     pub security_level: usize,
@@ -160,34 +154,21 @@ where
 
     pub folding_factor: FoldingFactor,
     pub rs_domain_initial_reduction_factor: usize,
-    pub round_parameters: Vec<RoundConfig<F>>,
+    pub round_parameters: Vec<RoundConfig<EF>>,
 
     pub final_queries: usize,
     pub final_pow_bits: usize,
     pub final_log_inv_rate: usize,
     pub final_sumcheck_rounds: usize,
     pub final_folding_pow_bits: usize,
-
-    // Merkle tree parameters
-    pub merkle_hash: Hash,
-    pub merkle_compress: C,
-
-    pub _base_field: PhantomData<F>,
-    pub _extension_field: PhantomData<EF>,
-    pub _digest_elems: PhantomData<[F; DIGEST_ELEMS]>,
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn second_batched_whir_config_builder<FB, EF, H, C, const DIGEST_ELEMS: usize>(
-    params_a: WhirConfigBuilder<H, C, DIGEST_ELEMS>,
+pub fn second_batched_whir_config_builder(
+    params_a: WhirConfigBuilder,
     num_variables_a: usize,
     num_variables_b: usize,
-) -> WhirConfigBuilder<H, C, DIGEST_ELEMS>
-where
-    FB: TwoAdicField,
-    EF: ExtensionField<FB> + TwoAdicField,
-    H: Clone,
-    C: Clone,
+) -> WhirConfigBuilder
 {
     let var_diff = num_variables_a.checked_sub(num_variables_b).unwrap();
 
@@ -199,16 +180,13 @@ where
     params_b
 }
 
-impl<F, EF, H, C, const DIGEST_ELEMS: usize> WhirConfig<F, EF, H, C, DIGEST_ELEMS>
+impl<EF> WhirConfig<EF>
 where
-    F: TwoAdicField,
-    EF: ExtensionField<F> + TwoAdicField,
+    EF: Field,
+    PF<EF>: TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(
-        whir_parameters: WhirConfigBuilder<H, C, DIGEST_ELEMS>,
-        num_variables: usize,
-    ) -> Self {
+    pub fn new(whir_parameters: WhirConfigBuilder, num_variables: usize) -> Self {
         whir_parameters
             .folding_factor
             .check_validity(num_variables)
@@ -236,7 +214,7 @@ where
         // Note that this does not restrict the amount of data committed, as long as folding_factor_0 > EF::TWO_ADICITY - F::TWO_ADICITY
         let log_folded_domain_size = log_domain_size - whir_parameters.folding_factor.at_round(0);
         assert!(
-            log_folded_domain_size <= F::TWO_ADICITY,
+            log_folded_domain_size <= PF::<EF>::TWO_ADICITY,
             "Increase folding_factor_0"
         );
 
@@ -311,7 +289,7 @@ where
             let folding_factor = whir_parameters.folding_factor.at_round(round);
             let next_folding_factor = whir_parameters.folding_factor.at_round(round + 1);
             let folded_domain_gen =
-                F::two_adic_generator(domain_size.ilog2() as usize - folding_factor);
+                PF::<EF>::two_adic_generator(domain_size.ilog2() as usize - folding_factor);
 
             round_parameters.push(RoundConfig {
                 pow_bits: pow_bits as usize,
@@ -360,11 +338,6 @@ where
             final_sumcheck_rounds,
             final_folding_pow_bits: final_folding_pow_bits as usize,
             final_log_inv_rate: log_inv_rate,
-            merkle_hash: whir_parameters.merkle_hash,
-            merkle_compress: whir_parameters.merkle_compress,
-            _base_field: PhantomData,
-            _extension_field: PhantomData,
-            _digest_elems: PhantomData,
         }
     }
 
@@ -416,10 +389,6 @@ where
 
     pub fn n_vars_of_final_polynomial(&self) -> usize {
         self.num_variables - self.folding_factor.total_number(self.n_rounds())
-    }
-
-    pub const fn max_fft_size(&self) -> usize {
-        self.num_variables + self.starting_log_inv_rate - self.folding_factor.at_round(0)
     }
 
     pub fn check_pow_bits(&self) -> bool {
@@ -519,7 +488,7 @@ where
     ///
     /// This is used by the verifier when verifying the final polynomial,
     /// ensuring consistent challenge selection and STIR constraint handling.
-    pub fn final_round_config(&self) -> RoundConfig<F> {
+    pub fn final_round_config(&self) -> RoundConfig<EF> {
         if self.round_parameters.is_empty() {
             // Fallback: no folding rounds, use initial domain setup
             RoundConfig {
@@ -528,7 +497,7 @@ where
                 num_queries: self.final_queries,
                 pow_bits: self.final_pow_bits,
                 domain_size: self.starting_domain_size(),
-                folded_domain_gen: F::two_adic_generator(
+                folded_domain_gen: PF::<EF>::two_adic_generator(
                     self.starting_domain_size().ilog2() as usize - self.folding_factor.at_round(0),
                 ),
                 ood_samples: 0, // no OOD in synthetic final phase
@@ -542,7 +511,7 @@ where
             // Derive final round config from last round, adjusted for next fold
             let last = self.round_parameters.last().unwrap();
             let domain_size = last.domain_size >> rs_reduction_factor;
-            let folded_domain_gen = F::two_adic_generator(
+            let folded_domain_gen = PF::<EF>::two_adic_generator(
                 domain_size.ilog2() as usize - self.folding_factor.at_round(self.n_rounds()),
             );
 
@@ -580,11 +549,9 @@ where
     }
 }
 
-impl<F, EF, Hash, C, const DIGEST_ELEMS: usize> ToString
-    for WhirConfig<F, EF, Hash, C, DIGEST_ELEMS>
+impl<EF> ToString for WhirConfig<EF>
 where
-    F: Field,
-    EF: ExtensionField<F>,
+    EF: ExtensionField<PF<EF>>,
 {
     fn to_string(&self) -> String {
         let mut s = String::new();
@@ -619,8 +586,7 @@ where
     }
 }
 
-/// Security assumptions determines which proximity parameters and conjectures are assumed by the error computation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityAssumption {
     /// Unique decoding assumes that the distance of each oracle is within the UDR of the code.
     /// We refer to this configuration as UD for short.
