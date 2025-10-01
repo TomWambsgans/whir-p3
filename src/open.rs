@@ -243,13 +243,12 @@ where
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()> {
         // Directly send coefficients of the polynomial to the verifier.
-        prover_state.add_extension_scalars(&unpack_extension(
-            &round_state
-                .sumcheck_prover
-                .evals
-                .as_extension_packed()
-                .unwrap(),
-        ));
+
+        prover_state.add_extension_scalars(&match &round_state.sumcheck_prover.evals {
+            MleOwned::Extension(evals) => evals.clone(),
+            MleOwned::ExtensionPacked(evals) => unpack_extension::<EF>(evals),
+            _ => unreachable!(),
+        });
 
         prover_state.pow_grinding(self.final_pow_bits);
 
