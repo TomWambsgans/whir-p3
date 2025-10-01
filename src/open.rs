@@ -497,64 +497,21 @@ where
         _pow_bits: usize, // TODO
     ) -> (Self, MultilinearPoint<EF>) {
         assert_ne!(folding_factor, 0);
-        let mut res = Vec::with_capacity(folding_factor);
 
-        let (mut weights, mut sum) =
-            combine_statement::<EF>(statement, combination_randomness, EF::ONE);
+        let (weights, sum) = combine_statement::<EF>(statement, combination_randomness, EF::ONE);
 
-        let sumcheck_poly = match evals {
-            MleRef::Base(evals) => compute_product_sumcheck_polynomial(
-                PFPacking::<EF>::pack_slice(&evals),
-                &weights,
-                sum,
-                |e| EFPacking::<EF>::to_ext_iter([e]).collect(),
-            ),
-            MleRef::ExtensionPacked(evals) => {
-                compute_product_sumcheck_polynomial(evals, &weights, sum, |e| {
-                    EFPacking::<EF>::to_ext_iter([e]).collect()
-                })
-            }
-            _ => unimplemented!(),
-        };
-        prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
+        let mut evals = evals.pack();
+        let mut weights = Mle::Owned(MleOwned::ExtensionPacked(weights));
+        let (challengess, new_sum) =
+            run_product_sumcheck(&mut evals, &mut weights, prover_state, sum, folding_factor);
 
-        // TODO: re-enable PoW grinding
-        // prover_state.pow_grinding(pow_bits);
-
-        let r: EF = prover_state.sample();
-
-        let compressed_evals: Vec<EFPacking<EF>> =
-            info_span!("initial compression").in_scope(|| {
-                fold_multilinear_in_place(&mut weights, &[(EF::ONE - r), r]);
-                match evals {
-                    MleRef::Base(evals) => {
-                        let folded = fold_multilinear(&evals, &[(EF::ONE - r), r], &|a, b| b * a);
-                        pack_extension(&folded) // TODO avoid the intermediate allocation "folded"
-                    }
-                    MleRef::ExtensionPacked(evals) => {
-                        fold_multilinear(&evals, &[(EF::ONE - r), r], &|a, b| a * b)
-                    }
-                    _ => unimplemented!(),
-                }
-            });
-
-        sum = sumcheck_poly.evaluate(r);
-
-        res.push(r);
-
-        let mut sumcheck = Self {
-            evals: MleOwned::ExtensionPacked(compressed_evals),
-            weights: MleOwned::ExtensionPacked(weights),
-            sum,
+        let sumcheck = Self {
+            evals: evals.as_owned().unwrap(),
+            weights: weights.as_owned().unwrap(),
+            sum: new_sum,
         };
 
-        // Apply rest of sumcheck rounds
-        let remaining_challenges = info_span!("remaining initial sumcheck rounds").in_scope(|| {
-            sumcheck.run_sumcheck_many_rounds(prover_state, folding_factor - 1, _pow_bits)
-        });
-        res.extend(remaining_challenges.0);
-
-        (sumcheck, MultilinearPoint(res))
+        (sumcheck, challengess)
     }
 
     pub(crate) fn run_initial_sumcheck_rounds_batched(
