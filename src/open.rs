@@ -462,10 +462,7 @@ where
         let num_vars_start = self.evals.by_ref().n_vars();
         let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
             1,
-            MleGroupOwned::merge(vec![
-                std::mem::take(&mut self.evals),
-                std::mem::take(&mut self.weights),
-            ]),
+            MleGroupRef::merge(&[&self.evals.by_ref(), &self.weights.by_ref()]),
             &ProductComputation,
             &ProductComputation,
             &[],
@@ -478,7 +475,7 @@ where
         );
 
         self.sum = new_sum;
-        [self.evals, self.weights] = folds.as_owned().unwrap().split().try_into().unwrap();
+        [self.evals, self.weights] = folds.split().try_into().unwrap();
 
         assert_eq!(
             self.evals.by_ref().n_vars(),
@@ -502,8 +499,11 @@ where
 
         let mut evals = evals.pack();
         let mut weights = Mle::Owned(MleOwned::ExtensionPacked(weights));
-        let (challengess, new_sum) =
-            run_product_sumcheck(&mut evals, &mut weights, prover_state, sum, folding_factor);
+        let (challengess, new_sum, new_evals, new_weights) =
+            run_product_sumcheck(&evals.by_ref(), &weights.by_ref(), prover_state, sum, folding_factor);
+        
+        evals = new_evals.into();
+        weights = new_weights.into();
 
         let sumcheck = Self {
             evals: evals.as_owned().unwrap(),
