@@ -652,7 +652,87 @@ where
                     |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
                 )
         } else {
-            unimplemented!()
+            let (c0_packed_1, c2_packed_1) = pol_b
+                .par_iter()
+                .zip(par_iter_split_2_capped(pol_a, 0..pol_b.len()))
+                .zip(weights_b.par_iter())
+                .zip(par_iter_split_2_capped(&weights_a, 0..pol_b.len()))
+                .zip(par_iter_mut_split_2_capped(
+                    &mut compressed_evals,
+                    0..pol_b.len(),
+                ))
+                .zip(par_iter_mut_split_2_capped(
+                    &mut compressed_weights,
+                    0..pol_b.len(),
+                ))
+                .map(
+                    |(
+                        (
+                            (
+                                ((&pol_b_left, (&pol_a_left, &pol_a_right)), &weights_b_left),
+                                (&weights_a_left, &weights_a_right),
+                            ),
+                            (compresses_eval_left, compresses_eval_right),
+                        ),
+                        (compresses_weight_left, compresses_weight_right),
+                    )| {
+                        *compresses_eval_left = (-pol_b_left + pol_a_left) * r_1 + pol_b_left;
+                        *compresses_eval_right = r_1_packed * pol_a_right;
+
+                        *compresses_weight_left =
+                            (-weights_b_left + weights_a_left) * r_1 + weights_b_left;
+                        *compresses_weight_right = weights_a_right * r_1;
+
+                        sumcheck_quadratic((
+                            (compresses_eval_left, compresses_eval_right),
+                            (compresses_weight_left, compresses_weight_right),
+                        ))
+                    },
+                )
+                .reduce(
+                    || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
+                    |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
+                );
+            let (c0_packed_2, c2_packed_2) =
+                par_iter_split_2_capped(pol_a, pol_b.len()..pol_a.len() / 2)
+                    .zip(par_iter_split_2_capped(
+                        &weights_a,
+                        pol_b.len()..pol_a.len() / 2,
+                    ))
+                    .zip(par_iter_mut_split_2_capped(
+                        &mut compressed_evals,
+                        pol_b.len()..pol_a.len() / 2,
+                    ))
+                    .zip(par_iter_mut_split_2_capped(
+                        &mut compressed_weights,
+                        pol_b.len()..pol_a.len() / 2,
+                    ))
+                    .map(
+                        |(
+                            (
+                                ((&pol_a_left, &pol_a_right), (&weights_a_left, &weights_a_right)),
+                                (compresses_eval_left, compresses_eval_right),
+                            ),
+                            (compresses_weight_left, compresses_weight_right),
+                        )| {
+                            *compresses_eval_left = r_1_packed * pol_a_left;
+                            *compresses_eval_right = r_1_packed * pol_a_right;
+
+                            *compresses_weight_left = weights_a_left * r_1;
+                            *compresses_weight_right = weights_a_right * r_1;
+
+                            sumcheck_quadratic((
+                                (compresses_eval_left, compresses_eval_right),
+                                (compresses_weight_left, compresses_weight_right),
+                            ))
+                        },
+                    )
+                    .reduce(
+                        || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
+                        |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
+                    );
+
+            (c0_packed_1 + c0_packed_2, c2_packed_1 + c2_packed_2)
         };
 
         let c0 = EFPacking::<EF>::to_ext_iter([c0_packed])
