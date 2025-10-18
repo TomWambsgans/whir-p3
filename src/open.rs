@@ -572,6 +572,7 @@ where
 
         let _compression_span = info_span!("1st compression + 2nd sumcheck polynomial").entered();
 
+        let r_1_packed = EFPacking::<EF>::from(r_1);
         let mut compressed_evals = unsafe { uninitialized_vec(pol_a.len()) };
         let mut compressed_weights = unsafe { uninitialized_vec(pol_a.len()) };
 
@@ -615,7 +616,41 @@ where
                     |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
                 )
         } else if pol_a.len() == pol_b.len() * 2 {
-            unimplemented!()
+            pol_b
+                .par_iter()
+                .zip(par_iter_split_2(pol_a))
+                .zip(weights_b.par_iter())
+                .zip(par_iter_split_2(&weights_a))
+                .zip(par_iter_mut_split_2(&mut compressed_evals))
+                .zip(par_iter_mut_split_2(&mut compressed_weights))
+                .map(
+                    |(
+                        (
+                            (
+                                ((&pol_b_left, (&pol_a_left, &pol_a_right)), &weights_b_left),
+                                (&weights_a_left, &weights_a_right),
+                            ),
+                            (compresses_eval_left, compresses_eval_right),
+                        ),
+                        (compresses_weight_left, compresses_weight_right),
+                    )| {
+                        *compresses_eval_left = (-pol_b_left + pol_a_left) * r_1 + pol_b_left;
+                        *compresses_eval_right = r_1_packed * pol_a_right;
+
+                        *compresses_weight_left =
+                            (-weights_b_left + weights_a_left) * r_1 + weights_b_left;
+                        *compresses_weight_right = weights_a_right * r_1;
+
+                        sumcheck_quadratic((
+                            (compresses_eval_left, compresses_eval_right),
+                            (compresses_weight_left, compresses_weight_right),
+                        ))
+                    },
+                )
+                .reduce(
+                    || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
+                    |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
+                )
         } else {
             unimplemented!()
         };
