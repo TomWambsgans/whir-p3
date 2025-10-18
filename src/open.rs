@@ -217,6 +217,7 @@ where
         );
 
         let next_folding_randomness = round_state.sumcheck_prover.run_sumcheck_many_rounds(
+            None,
             prover_state,
             folding_factor_next,
             round_params.folding_pow_bits,
@@ -294,6 +295,7 @@ where
         // Run final sumcheck if required
         if self.final_sumcheck_rounds > 0 {
             let final_folding_randomness = round_state.sumcheck_prover.run_sumcheck_many_rounds(
+                None,
                 prover_state,
                 self.final_sumcheck_rounds,
                 self.final_folding_pow_bits,
@@ -455,15 +457,15 @@ where
 
     fn run_sumcheck_many_rounds(
         &mut self,
+        prev_folding_scalar: Option<EF>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        folding_factor: usize,
+        n_rounds: usize,
         _pow_bits: usize, // TODO pow grinding
     ) -> MultilinearPoint<EF> {
-        let num_vars_start = self.evals.by_ref().n_vars();
         let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
             1,
             MleGroupRef::merge(&[&self.evals.by_ref(), &self.weights.by_ref()]),
-            None,
+            prev_folding_scalar.map(|r| vec![EF::ONE - r, r]),
             &ProductComputation,
             &ProductComputation,
             &[],
@@ -472,16 +474,11 @@ where
             prover_state,
             self.sum,
             None,
-            folding_factor,
+            n_rounds,
         );
 
         self.sum = new_sum;
         [self.evals, self.weights] = folds.split().try_into().unwrap();
-
-        assert_eq!(
-            self.evals.by_ref().n_vars(),
-            num_vars_start - folding_factor
-        );
 
         challenges
     }
@@ -544,70 +541,110 @@ where
             MleRef::Base(evals) => evals,
             _ => unimplemented!(),
         };
+        let pol_a = PFPacking::<EF>::pack_slice(pol_a);
         let pol_b = match pol_b {
             MleRef::ExtensionPacked(evals) => evals,
             _ => unimplemented!(),
         };
 
-        let linear_b_f_1: EF = dot_product_ef_packed_par(&weights_a[..pol_b.len()], &pol_b);
-        let linear_a_f_0: EF = dot_product_ef_packed_par(
-            &weights_b,
-            &PFPacking::<EF>::pack_slice(pol_a)[..pol_b.len()],
-        );
+        let (linear_b_f_1, linear_a_f_0): (EF, EF) =
+            info_span!("1st sumcheck poly").in_scope(|| {
+                (
+                    dot_product_ef_packed_par(&weights_a[..pol_b.len()], &pol_b),
+                    dot_product_ef_packed_par(&weights_b, &pol_a[..pol_b.len()]),
+                )
+            });
 
         let one_minus_x = DensePolynomial::new(vec![EF::ONE, -EF::ONE]);
         let x = DensePolynomial::new(vec![EF::ZERO, EF::ONE]);
         let sumcheck_poly_a = DensePolynomial::new(vec![linear_a_f_0, linear_a_f_1 - linear_a_f_0]);
         let sumcheck_poly_b = DensePolynomial::new(vec![linear_b_f_0, linear_b_f_1 - linear_b_f_0]);
-        let sumcheck_poly = &(&one_minus_x * &sumcheck_poly_b) + &(&x * &sumcheck_poly_a);
+        let sumcheck_poly_1 = &(&one_minus_x * &sumcheck_poly_b) + &(&x * &sumcheck_poly_a);
 
-        prover_state.add_extension_scalars(&sumcheck_poly.coeffs);
+        prover_state.add_extension_scalars(&sumcheck_poly_1.coeffs);
 
         // TODO: re-enable PoW grinding
         // prover_state.pow_grinding(pow_bits);
 
-        let r: EF = prover_state.sample();
+        let r_1: EF = prover_state.sample();
+        let sum_1 = sumcheck_poly_1.evaluate(r_1);
+        res.push(r_1);
 
-        let (compressed_evals, compressed_weights) =
-            info_span!("initial compression").in_scope(|| {
-                let pol_a_packed = PFPacking::<EF>::pack_slice(pol_a);
-                let r_packed = EFPacking::<EF>::from(r);
-                let compressed_evals: Vec<EFPacking<EF>> = pol_a_packed
-                    .par_iter()
-                    .zip(pol_b.par_iter())
-                    .map(|(&a, &b)| (-b + a) * r + b)
-                    .chain(
-                        pol_a_packed[pol_b.len()..]
-                            .par_iter()
-                            .map(|&a| r_packed * a),
-                    )
-                    .collect();
+        let _compression_span = info_span!("1st compression + 2nd sumcheck polynomial").entered();
 
-                let compressed_weights: Vec<EFPacking<EF>> = weights_a
-                    .par_iter()
-                    .zip(weights_b.par_iter())
-                    .map(|(&a, &b)| (-b + a) * r + b)
-                    .chain(weights_a[pol_b.len()..].par_iter().map(|&a| r_packed * a))
-                    .collect();
+        let mut compressed_evals = unsafe { uninitialized_vec(pol_a.len()) };
+        let mut compressed_weights = unsafe { uninitialized_vec(pol_a.len()) };
 
-                (compressed_evals, compressed_weights)
-            });
+        let (c0_packed, c2_packed) = if pol_a.len() == pol_b.len() {
+            par_iter_split_2(pol_b)
+                .zip(par_iter_split_2(pol_a))
+                .zip(par_iter_split_2(&weights_b))
+                .zip(par_iter_split_2(&weights_a))
+                .zip(par_iter_mut_split_2(&mut compressed_evals))
+                .zip(par_iter_mut_split_2(&mut compressed_weights))
+                .map(
+                    |(
+                        (
+                            (
+                                (
+                                    ((&pol_b_left, &pol_b_right), (&pol_a_left, &pol_a_right)),
+                                    (&weights_b_left, &weights_b_right),
+                                ),
+                                (&weights_a_left, &weights_a_right),
+                            ),
+                            (compresses_eval_left, compresses_eval_right),
+                        ),
+                        (compresses_weight_left, compresses_weight_right),
+                    )| {
+                        *compresses_eval_left = (-pol_b_left + pol_a_left) * r_1 + pol_b_left;
+                        *compresses_eval_right = (-pol_b_right + pol_a_right) * r_1 + pol_b_right;
 
-        tracing::warn!("TODO fold and compute sumcheck at the same time");
+                        *compresses_weight_left =
+                            (-weights_b_left + weights_a_left) * r_1 + weights_b_left;
+                        *compresses_weight_right =
+                            (-weights_b_right + weights_a_right) * r_1 + weights_b_right;
 
-        let sum = sumcheck_poly.evaluate(r);
+                        sumcheck_quadratic((
+                            (compresses_eval_left, compresses_eval_right),
+                            (compresses_weight_left, compresses_weight_right),
+                        ))
+                    },
+                )
+                .reduce(
+                    || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
+                    |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
+                )
+        } else if pol_a.len() == pol_b.len() * 2 {
+            unimplemented!()
+        } else {
+            unimplemented!()
+        };
 
-        res.push(r);
+        let c0 = EFPacking::<EF>::to_ext_iter([c0_packed])
+            .into_iter()
+            .sum::<EF>();
+        let c2 = EFPacking::<EF>::to_ext_iter([c2_packed])
+            .into_iter()
+            .sum::<EF>();
+        let c1 = sum_1 - c0.double() - c2;
+
+        std::mem::drop(_compression_span);
+
+        let sumcheck_poly_2 = DensePolynomial::new(vec![c0, c1, c2]);
+        prover_state.add_extension_scalars(&sumcheck_poly_2.coeffs);
+        let r2: EF = prover_state.sample();
+        let sum_2 = sumcheck_poly_2.evaluate(r2);
+        res.push(r2);
 
         let mut sumcheck = Self {
             evals: MleOwned::ExtensionPacked(compressed_evals),
             weights: MleOwned::ExtensionPacked(compressed_weights),
-            sum,
+            sum: sum_2,
         };
 
         // Apply rest of sumcheck rounds
         let remaining_challenges = info_span!("remaining initial sumcheck rounds").in_scope(|| {
-            sumcheck.run_sumcheck_many_rounds(prover_state, folding_factor - 1, _pow_bits)
+            sumcheck.run_sumcheck_many_rounds(Some(r2), prover_state, folding_factor - 2, _pow_bits)
         });
         res.extend(remaining_challenges.0);
 

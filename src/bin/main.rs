@@ -42,7 +42,7 @@ fn main() {
     type BaseFieldA = F;
     type BaseFieldB = EF;
 
-    let vars_diff = 3;
+    let vars_diff = 0;
 
     let num_variables_a = 25;
     let num_variables_b = num_variables_a - vars_diff;
