@@ -463,6 +463,7 @@ where
         let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
             1,
             MleGroupRef::merge(&[&self.evals.by_ref(), &self.weights.by_ref()]),
+            None,
             &ProductComputation,
             &ProductComputation,
             &[],
@@ -499,9 +500,14 @@ where
 
         let mut evals = evals.pack();
         let mut weights = Mle::Owned(MleOwned::ExtensionPacked(weights));
-        let (challengess, new_sum, new_evals, new_weights) =
-            run_product_sumcheck(&evals.by_ref(), &weights.by_ref(), prover_state, sum, folding_factor);
-        
+        let (challengess, new_sum, new_evals, new_weights) = run_product_sumcheck(
+            &evals.by_ref(),
+            &weights.by_ref(),
+            prover_state,
+            sum,
+            folding_factor,
+        );
+
         evals = new_evals.into();
         weights = new_weights.into();
 
@@ -586,6 +592,8 @@ where
 
                 (compressed_evals, compressed_weights)
             });
+
+        tracing::warn!("TODO fold and compute sumcheck at the same time");
 
         let sum = sumcheck_poly.evaluate(r);
 
@@ -797,21 +805,4 @@ where
     );
 
     (combined_evals, combined_sum_a, combined_sum_b)
-}
-
-#[inline]
-pub(crate) fn sumcheck_quadratic<F, EF>(p_0: F, p_1: F, eq_0: EF, eq_1: EF) -> (EF, EF)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    // Compute the constant coefficient:
-    // p(0) * w(0)
-    let constant = eq_0 * p_0;
-
-    // Compute the quadratic coefficient:
-    // (p(1) - p(0)) * (w(1) - w(0))
-    let quadratic = (eq_1 - eq_0) * (p_1 - p_0);
-
-    (constant, quadratic)
 }
