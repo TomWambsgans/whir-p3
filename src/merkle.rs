@@ -4,6 +4,7 @@ use multilinear_toolkit::prelude::*;
 use p3_commit::BatchOpeningRef;
 use p3_commit::ExtensionMmcs;
 use p3_commit::Mmcs;
+use p3_field::extension::BinomialExtensionField;
 use p3_koala_bear::{
     KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB, default_koalabear_poseidon2_16,
     default_koalabear_poseidon2_24,
@@ -57,6 +58,17 @@ pub(crate) fn merkle_commit<F: Field, EF: ExtensionField<F>>(
         let root = unsafe { std::mem::transmute_copy::<_, [F; DIGEST_ELEMS]>(&root) };
         let merkle_tree = unsafe { std::mem::transmute::<_, RoundMerkleTree<F, EF>>(merkle_tree) };
         (root, merkle_tree)
+    } else if TypeId::of::<(F, EF)>()
+        == TypeId::of::<(KoalaBear, BinomialExtensionField<KoalaBear, 4>)>()
+    {
+        let matrix = unsafe {
+            std::mem::transmute::<_, DenseMatrix<BinomialExtensionField<KoalaBear, 4>>>(matrix)
+        };
+        let (root, merkle_tree) =
+            get_koala_bear_mmcs::<BinomialExtensionField<KoalaBear, 4>>().commit_matrix(matrix);
+        let root = unsafe { std::mem::transmute_copy::<_, [F; DIGEST_ELEMS]>(&root) };
+        let merkle_tree = unsafe { std::mem::transmute::<_, RoundMerkleTree<F, EF>>(merkle_tree) };
+        (root, merkle_tree)
     } else {
         unimplemented!()
     }
@@ -84,6 +96,22 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
             std::mem::transmute::<_, &RoundMerkleTree<KoalaBear, KoalaBear>>(merkle_tree)
         };
         let mut batch_opening = get_koala_bear_mmcs::<KoalaBear>().open_batch(index, merkle_tree);
+        let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
+        let proof = batch_opening.opening_proof;
+        let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };
+        let proof = unsafe { std::mem::transmute::<_, Vec<[F; DIGEST_ELEMS]>>(proof) };
+        (leaf, proof)
+    } else if TypeId::of::<(F, EF)>()
+        == TypeId::of::<(KoalaBear, BinomialExtensionField<KoalaBear, 4>)>()
+    {
+        let merkle_tree = unsafe {
+            std::mem::transmute::<
+                _,
+                &RoundMerkleTree<KoalaBear, BinomialExtensionField<KoalaBear, 4>>,
+            >(merkle_tree)
+        };
+        let mut batch_opening = get_koala_bear_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
+            .open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
         let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };
@@ -118,10 +146,30 @@ pub(crate) fn merkle_verify<F: Field, EF: ExtensionField<F>>(
             )
             .is_ok()
     } else if TypeId::of::<(F, EF)>() == TypeId::of::<(KoalaBear, KoalaBear)>() {
-        let merkle_root = unsafe { std::mem::transmute_copy::<_, [KoalaBear; DIGEST_ELEMS]>(&merkle_root) };
+        let merkle_root =
+            unsafe { std::mem::transmute_copy::<_, [KoalaBear; DIGEST_ELEMS]>(&merkle_root) };
         let data = unsafe { std::mem::transmute::<_, Vec<KoalaBear>>(data) };
         let proof = unsafe { std::mem::transmute::<_, &Vec<[KoalaBear; DIGEST_ELEMS]>>(proof) };
         get_koala_bear_mmcs::<KoalaBear>()
+            .verify_batch(
+                &merkle_root.into(),
+                &[dimension],
+                index,
+                BatchOpeningRef {
+                    opened_values: &[data],
+                    opening_proof: proof,
+                },
+            )
+            .is_ok()
+    } else if TypeId::of::<(F, EF)>()
+        == TypeId::of::<(KoalaBear, BinomialExtensionField<KoalaBear, 4>)>()
+    {
+        let merkle_root =
+            unsafe { std::mem::transmute_copy::<_, [KoalaBear; DIGEST_ELEMS]>(&merkle_root) };
+        let data =
+            unsafe { std::mem::transmute::<_, Vec<BinomialExtensionField<KoalaBear, 4>>>(data) };
+        let proof = unsafe { std::mem::transmute::<_, &Vec<[KoalaBear; DIGEST_ELEMS]>>(proof) };
+        get_koala_bear_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
             .verify_batch(
                 &merkle_root.into(),
                 &[dimension],
