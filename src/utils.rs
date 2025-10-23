@@ -76,7 +76,7 @@ where
     let prepared_evals = prepare_evals_for_fft(&evals, folding_factor, log_inv_rate);
     let width = 1 << folding_factor;
     let dft = global_dft::<PF<EF>>();
-    let dft_size = evals.n_vars() >> (folding_factor - log_inv_rate);
+    let dft_size = (evals.n_vars() >> folding_factor) << log_inv_rate;
     if dft.max_n_twiddles() < dft_size {
         tracing::warn!(
             "Twiddles have not been precomputed, for size = {}",
