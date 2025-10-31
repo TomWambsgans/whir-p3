@@ -144,14 +144,53 @@ fn main() {
         prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
 
     let time = Instant::now();
+
+    let batching_challenge = prover_state.sample();
+
+    let ood_statements_a = witness_a
+        .ood_points
+        .iter()
+        .zip(&witness_a.ood_answers)
+        .map(|(&point, &evaluation)| {
+            Evaluation::new(
+                MultilinearPoint::expand_from_univariate(point, polynomial_a.n_vars()),
+                evaluation,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut ood_and_statement_a = statement_a.clone();
+    ood_and_statement_a.splice(0..0, ood_statements_a);
+
+    let ood_statements_b = witness_b
+        .ood_points
+        .iter()
+        .zip(&witness_b.ood_answers)
+        .map(|(&point, &evaluation)| {
+            Evaluation::new(
+                MultilinearPoint::expand_from_univariate(point, polynomial_b.n_vars()),
+                evaluation,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut ood_and_statement_b = statement_b.clone();
+    ood_and_statement_b.splice(0..0, ood_statements_b);
+
+    let (weights_a, sum_a) = combine_statement(&ood_and_statement_a, batching_challenge, EF::ONE);
+    let (weights_b, sum_b) = combine_statement(
+        &ood_and_statement_b,
+        batching_challenge,
+        batching_challenge.exp_u64(ood_and_statement_a.len() as u64),
+    );
     params_a.batch_prove(
         &mut prover_state,
-        statement_a.clone(),
         witness_a,
         &polynomial_a.by_ref(),
-        statement_b.clone(),
+        weights_a,
+        sum_a,
         witness_b,
         &polynomial_b.by_ref(),
+        weights_b,
+        sum_b,
     );
     let opening_time_batch = time.elapsed();
     let proof_size_batch =

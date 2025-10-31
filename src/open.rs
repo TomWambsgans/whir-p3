@@ -61,12 +61,14 @@ where
     pub fn batch_prove(
         &self,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<EF>,
         polynomial_a: &MleRef<'_, EF>,
-        statement_b: Vec<Evaluation<EF>>,
+        weight_a: Vec<EFPacking<EF>>,
+        sum_a: EF,
         witness_b: Witness<EF>,
         polynomial_b: &MleRef<'_, EF>,
+        weight_b: Vec<EFPacking<EF>>,
+        sum_b: EF,
     ) -> MultilinearPoint<EF>
     where
         PF<EF>: TwoAdicField,
@@ -78,12 +80,14 @@ where
         let mut round_state = RoundState::initialize_first_round_state_batch(
             self,
             prover_state,
-            statement_a,
             witness_a,
             polynomial_a,
-            statement_b,
+            weight_a,
+            sum_a,
             witness_b,
             polynomial_b,
+            weight_b,
+            sum_b,
         );
 
         for round in 0..=self.n_rounds() {
@@ -519,22 +523,15 @@ where
     pub(crate) fn run_initial_sumcheck_rounds_batched(
         pol_a: &MleRef<'_, EF>,
         pol_b: &MleRef<'_, EF>,
-        statement_a: Vec<Evaluation<EF>>,
-        statement_b: Vec<Evaluation<EF>>,
-        combination_randomness: EF,
+        weights_a: Vec<EFPacking<EF>>,
+        weights_b: Vec<EFPacking<EF>>,
+        sum_a: EF,
+        sum_b: EF,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
         folding_factor: usize,
         _pow_bits: usize, // TODO
     ) -> (Self, MultilinearPoint<EF>) {
         let mut res = Vec::with_capacity(folding_factor);
-
-        let (weights_a, linear_a_f_1) =
-            combine_statement(&statement_a, combination_randomness, EF::ONE);
-        let (weights_b, linear_b_f_0) = combine_statement(
-            &statement_b,
-            combination_randomness,
-            combination_randomness.exp_u64(statement_a.len() as u64),
-        );
 
         let pol_a = match pol_a {
             MleRef::Base(evals) => evals,
@@ -548,16 +545,16 @@ where
 
         let (linear_b_f_1, linear_a_f_0): (EF, EF) =
             info_span!("1st sumcheck poly").in_scope(|| {
-                (
-                    dot_product_ef_packed_par(&weights_a[..pol_b.len()], &pol_b),
-                    dot_product_ef_packed_par(&weights_b, &pol_a[..pol_b.len()]),
+                rayon::join(
+                    || dot_product_ef_packed_par(&weights_a[..pol_b.len()], &pol_b),
+                    || dot_product_ef_packed_par(&weights_b, &pol_a[..pol_b.len()]),
                 )
             });
 
         let one_minus_x = DensePolynomial::new(vec![EF::ONE, -EF::ONE]);
         let x = DensePolynomial::new(vec![EF::ZERO, EF::ONE]);
-        let sumcheck_poly_a = DensePolynomial::new(vec![linear_a_f_0, linear_a_f_1 - linear_a_f_0]);
-        let sumcheck_poly_b = DensePolynomial::new(vec![linear_b_f_0, linear_b_f_1 - linear_b_f_0]);
+        let sumcheck_poly_a = DensePolynomial::new(vec![linear_a_f_0, sum_a - linear_a_f_0]);
+        let sumcheck_poly_b = DensePolynomial::new(vec![sum_b, linear_b_f_1 - sum_b]);
         let sumcheck_poly_1 = &(&one_minus_x * &sumcheck_poly_b) + &(&x * &sumcheck_poly_a);
 
         prover_state.add_extension_scalars(&sumcheck_poly_1.coeffs);
@@ -797,48 +794,23 @@ where
     pub(crate) fn initialize_first_round_state_batch(
         prover: &WhirConfig<EF>,
         prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        mut statement_a: Vec<Evaluation<EF>>,
         witness_a: Witness<EF>,
         polynomial_a: &MleRef<'_, EF>,
-        mut statement_b: Vec<Evaluation<EF>>,
+        weight_a: Vec<EFPacking<EF>>,
+        sum_a: EF,
         witness_b: Witness<EF>,
         polynomial_b: &MleRef<'_, EF>,
+        weight_b: Vec<EFPacking<EF>>,
+        sum_b: EF,
     ) -> Self {
-        let ood_statements_a = witness_a
-            .ood_points
-            .into_iter()
-            .zip(witness_a.ood_answers)
-            .map(|(point, evaluation)| {
-                Evaluation::new(
-                    MultilinearPoint::expand_from_univariate(point, polynomial_a.n_vars()),
-                    evaluation,
-                )
-            })
-            .collect::<Vec<_>>();
-        statement_a.splice(0..0, ood_statements_a);
-
-        let ood_statements_b = witness_b
-            .ood_points
-            .into_iter()
-            .zip(witness_b.ood_answers)
-            .map(|(point, evaluation)| {
-                Evaluation::new(
-                    MultilinearPoint::expand_from_univariate(point, polynomial_b.n_vars()),
-                    evaluation,
-                )
-            })
-            .collect::<Vec<_>>();
-        statement_b.splice(0..0, ood_statements_b);
-
-        let combination_randomness_gen: EF = prover_state.sample();
-
         let (sumcheck_prover, folding_randomness) =
             SumcheckSingle::run_initial_sumcheck_rounds_batched(
                 polynomial_a,
                 polynomial_b,
-                statement_a,
-                statement_b,
-                combination_randomness_gen,
+                weight_a,
+                weight_b,
+                sum_a,
+                sum_b,
                 prover_state,
                 prover.folding_factor.at_round(0) + 1,
                 prover.starting_folding_pow_bits,
@@ -862,8 +834,8 @@ where
     }
 }
 
-#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
-fn combine_statement<EF>(
+#[instrument(skip_all)]
+pub fn combine_statement<EF>(
     statement: &[Evaluation<EF>],
     challenge: EF,
     start: EF,
@@ -890,34 +862,4 @@ where
             });
 
     (combined_evals, combined_sum)
-}
-
-#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
-fn combine_statement_batched<EF>(
-    statement: &[Evaluation<EF>],
-    challenge: EF,
-) -> (Vec<EFPacking<EF>>, EF, EF)
-where
-    EF: ExtensionField<PF<EF>>,
-{
-    let num_variables = statement[0].num_variables();
-    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
-
-    let mut combined_evals =
-        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
-    let (combined_sum_a, combined_sum_b, _) = statement.iter().fold(
-        (EF::ZERO, EF::ZERO, EF::ONE),
-        |(mut acc_sum_a, mut acc_sum_b, gamma_pow), constraint| {
-            compute_sparse_eval_eq_packed::<EF>(&constraint.point, &mut combined_evals, gamma_pow);
-            if constraint.point[0] == EF::ZERO {
-                acc_sum_b += constraint.value * gamma_pow;
-            } else {
-                assert_eq!(constraint.point[0], EF::ONE);
-                acc_sum_a += constraint.value * gamma_pow;
-            }
-            (acc_sum_a, acc_sum_b, gamma_pow * challenge)
-        },
-    );
-
-    (combined_evals, combined_sum_a, combined_sum_b)
 }
