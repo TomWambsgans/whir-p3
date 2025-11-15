@@ -466,7 +466,7 @@ where
             1,
             MleGroupRef::merge(&[&self.evals.by_ref(), &self.weights.by_ref()]),
             prev_folding_scalar.map(|r| vec![EF::ONE - r, r]),
-            &ProductComputation,
+            &ProductComputation {},
             &[],
             None,
             false,
