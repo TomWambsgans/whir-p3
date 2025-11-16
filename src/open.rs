@@ -474,6 +474,7 @@ where
             self.sum,
             None,
             n_rounds,
+            false
         );
 
         self.sum = new_sum;
