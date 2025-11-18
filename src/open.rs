@@ -462,9 +462,10 @@ where
         n_rounds: usize,
         _pow_bits: usize, // TODO pow grinding
     ) -> MultilinearPoint<EF> {
-        let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
+        let (challenges, folds, _, new_sum) = sumcheck_prove_many_rounds(
             1,
             MleGroupRef::merge(&[&self.evals.by_ref(), &self.weights.by_ref()]),
+            None,
             prev_folding_scalar.map(|r| vec![EF::ONE - r, r]),
             &ProductComputation {},
             &[],
