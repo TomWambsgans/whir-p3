@@ -468,7 +468,7 @@ where
             None,
             prev_folding_scalar.map(|r| vec![EF::ONE - r, r]),
             &ProductComputation {},
-            &[],
+            &vec![],
             None,
             false,
             prover_state,
