@@ -475,7 +475,7 @@ where
             self.sum,
             None,
             n_rounds,
-            false
+            false,
         );
 
         self.sum = new_sum;
@@ -864,6 +864,11 @@ where
     }
 }
 
+struct SendPtr<T>(*mut T);
+unsafe impl<T> Send for SendPtr<T> {}
+unsafe impl<T> Sync for SendPtr<T> {}
+use std::sync::atomic::{AtomicPtr, Ordering};
+
 #[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
 fn combine_statement<EF>(
     statement: &[Evaluation<EF>],
@@ -876,50 +881,69 @@ where
     let num_variables = statement[0].num_variables();
     assert!(statement.iter().all(|e| e.num_variables() == num_variables));
 
+    let segments = statement
+        .iter()
+        .enumerate()
+        .map(|(index, s)| {
+            let boolean_starts = s
+                .point
+                .iter()
+                .take_while(|&&x| x.is_zero() || x.is_one())
+                .map(|&x| x.is_one())
+                .collect::<Vec<_>>();
+            let starts_big_endian = boolean_starts
+                .iter()
+                .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
+            let segment_start = starts_big_endian << (num_variables - boolean_starts.len());
+            let segmet_end = (starts_big_endian + 1) << (num_variables - boolean_starts.len());
+            Segment::new(segment_start, segmet_end, index)
+        })
+        .collect::<Vec<_>>();
+    let partition_parallel_friendly = build_non_overlapping_partition(segments);
+
     let mut combined_evals =
         EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
-    let (combined_sum, _) =
-        statement
-            .iter()
-            .fold((EF::ZERO, start), |(mut acc_sum, gamma_pow), constraint| {
+
+    let mut combined_sum = EF::ZERO;
+    let mut gamma_pows = vec![start];
+    for _ in 1..statement.len() {
+        let last = *gamma_pows.last().unwrap();
+        gamma_pows.push(last * challenge);
+    }
+
+    // Store the pointer in an atomic for thread-safe sharing
+    let combined_evals_ptr = AtomicPtr::new(combined_evals.as_mut_ptr());
+    let combined_evals_len = combined_evals.len();
+
+    for group in partition_parallel_friendly {
+        combined_sum += group
+            .par_iter()
+            .map(|segment| {
+                let index = segment.data;
+                let eval = statement[index].value;
+                let gamma_pow = gamma_pows[index];
+
+                // Load the pointer atomically (relaxed is fine since the pointer doesn't change)
+                let ptr = combined_evals_ptr.load(Ordering::Relaxed);
+                
+                // Create a mutable slice from the raw pointer
+                // This is safe because:
+                // 1. The pointer is valid (from a live Vec)
+                // 2. Segments are non-overlapping
+                // 3. The Vec remains alive for the duration
+                let combined_evals_slice = unsafe {
+                    std::slice::from_raw_parts_mut(ptr, combined_evals_len)
+                };
+
                 compute_sparse_eval_eq_packed::<EF>(
-                    &constraint.point,
-                    &mut combined_evals,
+                    &statement[index].point,
+                    combined_evals_slice,
                     gamma_pow,
                 );
-                acc_sum += constraint.value * gamma_pow;
-                (acc_sum, gamma_pow * challenge)
-            });
+                eval * gamma_pow
+            })
+            .sum::<EF>();
+    }
 
     (combined_evals, combined_sum)
-}
-
-#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
-fn combine_statement_batched<EF>(
-    statement: &[Evaluation<EF>],
-    challenge: EF,
-) -> (Vec<EFPacking<EF>>, EF, EF)
-where
-    EF: ExtensionField<PF<EF>>,
-{
-    let num_variables = statement[0].num_variables();
-    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
-
-    let mut combined_evals =
-        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
-    let (combined_sum_a, combined_sum_b, _) = statement.iter().fold(
-        (EF::ZERO, EF::ZERO, EF::ONE),
-        |(mut acc_sum_a, mut acc_sum_b, gamma_pow), constraint| {
-            compute_sparse_eval_eq_packed::<EF>(&constraint.point, &mut combined_evals, gamma_pow);
-            if constraint.point[0] == EF::ZERO {
-                acc_sum_b += constraint.value * gamma_pow;
-            } else {
-                assert_eq!(constraint.point[0], EF::ONE);
-                acc_sum_a += constraint.value * gamma_pow;
-            }
-            (acc_sum_a, acc_sum_b, gamma_pow * challenge)
-        },
-    );
-
-    (combined_evals, combined_sum_a, combined_sum_b)
 }
