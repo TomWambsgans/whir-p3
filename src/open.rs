@@ -1,3 +1,5 @@
+use std::array;
+
 use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_util::log2_strict_usize;
@@ -462,18 +464,20 @@ where
         n_rounds: usize,
         _pow_bits: usize, // TODO pow grinding
     ) -> MultilinearPoint<EF> {
-        let (challenges, folds, new_sum) = sumcheck_prove_many_rounds(
+        let (challenges, folds, _, new_sum) = sumcheck_prove_many_rounds(
             1,
             MleGroupRef::merge(&[&self.evals.by_ref(), &self.weights.by_ref()]),
+            None,
             prev_folding_scalar.map(|r| vec![EF::ONE - r, r]),
-            &ProductComputation,
-            &[],
+            &ProductComputation {},
+            &vec![],
             None,
             false,
             prover_state,
             self.sum,
             None,
             n_rounds,
+            false,
         );
 
         self.sum = new_sum;
@@ -862,62 +866,82 @@ where
     }
 }
 
-#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
+#[instrument(skip_all, fields(num_constraints = statements.len(), n_vars = statements[0].num_variables()))]
 fn combine_statement<EF>(
-    statement: &[Evaluation<EF>],
+    statements: &[Evaluation<EF>],
     challenge: EF,
     start: EF,
 ) -> (Vec<EFPacking<EF>>, EF)
 where
     EF: ExtensionField<PF<EF>>,
 {
-    let num_variables = statement[0].num_variables();
-    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
-
-    let mut combined_evals =
-        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
-    let (combined_sum, _) =
-        statement
+    let num_variables = statements[0].num_variables();
+    assert!(
+        statements
             .iter()
-            .fold((EF::ZERO, start), |(mut acc_sum, gamma_pow), constraint| {
-                compute_sparse_eval_eq_packed::<EF>(
-                    &constraint.point,
-                    &mut combined_evals,
-                    gamma_pow,
-                );
-                acc_sum += constraint.value * gamma_pow;
-                (acc_sum, gamma_pow * challenge)
-            });
-
-    (combined_evals, combined_sum)
-}
-
-#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
-fn combine_statement_batched<EF>(
-    statement: &[Evaluation<EF>],
-    challenge: EF,
-) -> (Vec<EFPacking<EF>>, EF, EF)
-where
-    EF: ExtensionField<PF<EF>>,
-{
-    let num_variables = statement[0].num_variables();
-    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
-
-    let mut combined_evals =
-        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
-    let (combined_sum_a, combined_sum_b, _) = statement.iter().fold(
-        (EF::ZERO, EF::ZERO, EF::ONE),
-        |(mut acc_sum_a, mut acc_sum_b, gamma_pow), constraint| {
-            compute_sparse_eval_eq_packed::<EF>(&constraint.point, &mut combined_evals, gamma_pow);
-            if constraint.point[0] == EF::ZERO {
-                acc_sum_b += constraint.value * gamma_pow;
-            } else {
-                assert_eq!(constraint.point[0], EF::ONE);
-                acc_sum_a += constraint.value * gamma_pow;
-            }
-            (acc_sum_a, acc_sum_b, gamma_pow * challenge)
-        },
+            .all(|e| e.num_variables() == num_variables)
     );
 
-    (combined_evals, combined_sum_a, combined_sum_b)
+    const LOG_N_THREADS: usize = 5;
+
+    let mut statement_groups: [Vec<Vec<(Evaluation<EF>, usize)>>; LOG_N_THREADS] =
+        array::from_fn(|i| vec![vec![]; 1 << i]);
+
+    for (index, s) in statements.iter().enumerate() {
+        let boolean_starts = s.point[..LOG_N_THREADS - 1]
+            .iter()
+            .take_while(|&&x| x.is_zero() || x.is_one())
+            .map(|&x| x.is_one())
+            .collect::<Vec<_>>();
+        let starts_big_endian = boolean_starts
+            .iter()
+            .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
+        let new_evaluation = Evaluation::new(
+            MultilinearPoint(s.point[boolean_starts.len()..].to_vec()),
+            s.value,
+        );
+        statement_groups[boolean_starts.len()][starts_big_endian].push((new_evaluation, index));
+    }
+
+    let mut combined_evals =
+        EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
+
+    let mut combined_sum = EF::ZERO;
+    let mut gamma_pows = vec![start];
+    for _ in 1..statements.len() {
+        let last = *gamma_pows.last().unwrap();
+        gamma_pows.push(last * challenge);
+    }
+
+    let mut chunks_mut = vec![combined_evals.as_mut_slice()];
+
+    for n_bools_start in 0..LOG_N_THREADS {
+        combined_sum += statement_groups[n_bools_start]
+            .par_iter()
+            .zip(chunks_mut.par_iter_mut())
+            .map(|(group, combined_chunk)| {
+                let mut sum = EF::ZERO;
+                for (evaluation, original_index) in group {
+                    let gamma_pow = gamma_pows[*original_index];
+                    compute_sparse_eval_eq_packed::<EF>(
+                        &evaluation.point,
+                        combined_chunk,
+                        gamma_pow,
+                    );
+                    sum += evaluation.value * gamma_pow;
+                }
+                sum
+            })
+            .sum::<EF>();
+
+        let mut new_chunks_mut = Vec::with_capacity(chunks_mut.len() * 2);
+        for chunk in chunks_mut {
+            let (left, right) = chunk.split_at_mut(chunk.len() / 2);
+            new_chunks_mut.push(left);
+            new_chunks_mut.push(right);
+        }
+        chunks_mut = new_chunks_mut;
+    }
+
+    (combined_evals, combined_sum)
 }

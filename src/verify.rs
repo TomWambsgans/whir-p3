@@ -632,7 +632,6 @@ where
                 ) {
                     return Err(ProofError::InvalidProof);
                 }
-               
             }
 
             // Convert the base field values to EF and collect them into a result vector.
