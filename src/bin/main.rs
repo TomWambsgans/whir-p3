@@ -117,7 +117,7 @@ fn main() {
 
     let challenger = MyChallenger::new(poseidon16);
 
-    let mut prover_state = ProverState::new(challenger.clone());
+    let mut prover_state = ProverState::new(challenger.clone(), false);
 
     precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
@@ -158,7 +158,7 @@ fn main() {
         prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0
             - proof_size_single;
 
-    let mut verifier_state = VerifierState::new(prover_state.proof_data().to_vec(), challenger);
+    let mut verifier_state = VerifierState::new(prover_state.into_proof(), challenger);
 
     let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
     let parsed_commitment_b = params_b
