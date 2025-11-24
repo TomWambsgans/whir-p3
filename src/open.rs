@@ -1,3 +1,5 @@
+use std::array;
+
 use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_util::log2_strict_usize;
@@ -860,85 +862,81 @@ where
     }
 }
 
-struct SendPtr<T>(*mut T);
-unsafe impl<T> Send for SendPtr<T> {}
-unsafe impl<T> Sync for SendPtr<T> {}
-use std::sync::atomic::{AtomicPtr, Ordering};
-
-#[instrument(skip_all, fields(num_constraints = statement.len(), n_vars = statement[0].num_variables()))]
+#[instrument(skip_all, fields(num_constraints = statements.len(), n_vars = statements[0].num_variables()))]
 fn combine_statement<EF>(
-    statement: &[Evaluation<EF>],
+    statements: &[Evaluation<EF>],
     challenge: EF,
     start: EF,
 ) -> (Vec<EFPacking<EF>>, EF)
 where
     EF: ExtensionField<PF<EF>>,
 {
-    let num_variables = statement[0].num_variables();
-    assert!(statement.iter().all(|e| e.num_variables() == num_variables));
+    let num_variables = statements[0].num_variables();
+    assert!(
+        statements
+            .iter()
+            .all(|e| e.num_variables() == num_variables)
+    );
 
-    let segments = statement
-        .iter()
-        .enumerate()
-        .map(|(index, s)| {
-            let boolean_starts = s
-                .point
-                .iter()
-                .take_while(|&&x| x.is_zero() || x.is_one())
-                .map(|&x| x.is_one())
-                .collect::<Vec<_>>();
-            let starts_big_endian = boolean_starts
-                .iter()
-                .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
-            let segment_start = starts_big_endian << (num_variables - boolean_starts.len());
-            let segmet_end = (starts_big_endian + 1) << (num_variables - boolean_starts.len());
-            Segment::new(segment_start, segmet_end, index)
-        })
-        .collect::<Vec<_>>();
-    let partition_parallel_friendly = build_non_overlapping_partition(segments);
+    const LOG_N_THREADS: usize = 5;
+
+    let mut statement_groups: [Vec<Vec<(Evaluation<EF>, usize)>>; LOG_N_THREADS] =
+        array::from_fn(|i| vec![vec![]; 1 << i]);
+
+    for (index, s) in statements.iter().enumerate() {
+        let boolean_starts = s.point[..LOG_N_THREADS - 1]
+            .iter()
+            .take_while(|&&x| x.is_zero() || x.is_one())
+            .map(|&x| x.is_one())
+            .collect::<Vec<_>>();
+        let starts_big_endian = boolean_starts
+            .iter()
+            .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
+        let new_evaluation = Evaluation::new(
+            MultilinearPoint(s.point[boolean_starts.len()..].to_vec()),
+            s.value,
+        );
+        statement_groups[boolean_starts.len()][starts_big_endian].push((new_evaluation, index));
+    }
 
     let mut combined_evals =
         EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
 
     let mut combined_sum = EF::ZERO;
     let mut gamma_pows = vec![start];
-    for _ in 1..statement.len() {
+    for _ in 1..statements.len() {
         let last = *gamma_pows.last().unwrap();
         gamma_pows.push(last * challenge);
     }
 
-    // Store the pointer in an atomic for thread-safe sharing
-    let combined_evals_ptr = AtomicPtr::new(combined_evals.as_mut_ptr());
-    let combined_evals_len = combined_evals.len();
+    let mut chunks_mut = vec![combined_evals.as_mut_slice()];
 
-    for group in partition_parallel_friendly {
-        combined_sum += group
+    for n_bools_start in 0..LOG_N_THREADS {
+        combined_sum += statement_groups[n_bools_start]
             .par_iter()
-            .map(|segment| {
-                let index = segment.data;
-                let eval = statement[index].value;
-                let gamma_pow = gamma_pows[index];
-
-                // Load the pointer atomically (relaxed is fine since the pointer doesn't change)
-                let ptr = combined_evals_ptr.load(Ordering::Relaxed);
-                
-                // Create a mutable slice from the raw pointer
-                // This is safe because:
-                // 1. The pointer is valid (from a live Vec)
-                // 2. Segments are non-overlapping
-                // 3. The Vec remains alive for the duration
-                let combined_evals_slice = unsafe {
-                    std::slice::from_raw_parts_mut(ptr, combined_evals_len)
-                };
-
-                compute_sparse_eval_eq_packed::<EF>(
-                    &statement[index].point,
-                    combined_evals_slice,
-                    gamma_pow,
-                );
-                eval * gamma_pow
+            .zip(chunks_mut.par_iter_mut())
+            .map(|(group, combined_chunk)| {
+                let mut sum = EF::ZERO;
+                for (evaluation, original_index) in group {
+                    let gamma_pow = gamma_pows[*original_index];
+                    compute_sparse_eval_eq_packed::<EF>(
+                        &evaluation.point,
+                        combined_chunk,
+                        gamma_pow,
+                    );
+                    sum += evaluation.value * gamma_pow;
+                }
+                sum
             })
             .sum::<EF>();
+
+        let mut new_chunks_mut = Vec::with_capacity(chunks_mut.len() * 2);
+        for chunk in chunks_mut {
+            let (left, right) = chunk.split_at_mut(chunk.len() / 2);
+            new_chunks_mut.push(left);
+            new_chunks_mut.push(right);
+        }
+        chunks_mut = new_chunks_mut;
     }
 
     (combined_evals, combined_sum)

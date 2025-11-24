@@ -17,9 +17,6 @@ mod merkle;
 pub use merkle::DIGEST_ELEMS;
 pub(crate) use merkle::*;
 
-mod non_overlapping_parallelism;
-pub use non_overlapping_parallelism::*;
-
 mod utils;
 pub use utils::precompute_dft_twiddles;
 pub(crate) use utils::*;
