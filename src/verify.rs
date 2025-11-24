@@ -609,13 +609,9 @@ where
             // Merkle proofs
             let mut merkle_proofs = Vec::new();
             for _ in 0..indices.len() {
-                let mut merkle_path = vec![];
-                for _ in 0..self.merkle_tree_height(round_index) {
-                    let digest: [PF<EF>; DIGEST_ELEMS] = verifier_state
-                        .receive_hint_base_scalars(DIGEST_ELEMS)?
-                        .try_into()
-                        .unwrap();
-                    merkle_path.push(digest);
+                let merkle_path = verifier_state.receive_hint_merkle_path()?;
+                if merkle_path.len() != self.merkle_tree_height(round_index) {
+                    return Err(ProofError::InvalidProof);
                 }
                 merkle_proofs.push(merkle_path);
             }
@@ -632,7 +628,6 @@ where
                 ) {
                     return Err(ProofError::InvalidProof);
                 }
-               
             }
 
             // Convert the base field values to EF and collect them into a result vector.
@@ -655,13 +650,9 @@ where
             // Merkle proofs
             let mut merkle_proofs = Vec::new();
             for _ in 0..indices.len() {
-                let mut merkle_path = vec![];
-                for _ in 0..self.merkle_tree_height(round_index) {
-                    let digest: [PF<EF>; DIGEST_ELEMS] = verifier_state
-                        .receive_hint_base_scalars(DIGEST_ELEMS)?
-                        .try_into()
-                        .unwrap();
-                    merkle_path.push(digest);
+                let merkle_path = verifier_state.receive_hint_merkle_path()?;
+                if merkle_path.len() != self.merkle_tree_height(round_index) {
+                    return Err(ProofError::InvalidProof);
                 }
                 merkle_proofs.push(merkle_path);
             }
