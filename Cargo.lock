@@ -231,7 +231,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 [[package]]
 name = "fiat-shamir"
 version = "0.1.0"
-source = "git+https://github.com/leanEthereum/fiat-shamir.git?branch=modular-precompiles#1b69ee23b0b792974dfad07533cf587599b4f67a"
+source = "git+https://github.com/leanEthereum/fiat-shamir.git?branch=modular-precompiles#b1981c9a28234619f252dc0c738ab0429e7665bb"
 dependencies = [
  "p3-challenger",
  "p3-field",
