@@ -1,19 +1,16 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{PrimeField64, extension::BinomialExtensionField};
+use p3_field::PrimeCharacteristicRing;
+use p3_field::extension::BinomialExtensionField;
 use p3_goldilocks::Goldilocks;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use rand::{
-    Rng, SeedableRng,
-    rngs::{SmallRng, StdRng},
-};
-use tracing_forest::{ForestLayer, util::LevelFilter};
-use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use whir_p3::{
     fiat_shamir::domain_separator::DomainSeparator,
     parameters::{DEFAULT_MAX_POW, FoldingFactor, ProtocolParameters, errors::SecurityAssumption},
@@ -51,9 +48,6 @@ struct Args {
     #[arg(short = 'p', long)]
     pow_bits: Option<usize>,
 
-    #[arg(short = 'd', long, default_value = "25")]
-    num_variables: usize,
-
     #[arg(short = 'e', long = "evaluations", default_value = "1")]
     num_evaluations: usize,
 
@@ -72,33 +66,19 @@ struct Args {
 
 #[allow(clippy::too_many_lines)]
 fn main() {
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
-
-    Registry::default()
-        .with(env_filter)
-        .with(ForestLayer::default())
-        .init();
-
     let mut args = Args::parse();
 
     if args.pow_bits.is_none() {
         args.pow_bits = Some(DEFAULT_MAX_POW);
     }
 
-    // Runs as a PCS
     let security_level = args.security_level;
     let pow_bits = args.pow_bits.unwrap();
-    let num_variables = args.num_variables;
     let starting_rate = args.rate;
     let folding_factor = FoldingFactor::Constant(args.folding_factor);
     let soundness_type = args.soundness_type;
-    let num_evaluations = args.num_evaluations;
-
-    if num_evaluations == 0 {
-        println!("Warning: running as PCS but no evaluations specified.");
-    }
+    let rs_domain_initial_reduction_factor = args.rs_domain_initial_reduction_factor;
+    let n_reps: usize = 20;
 
     // Create hash and compression functions for the Merkle tree
     let mut rng = SmallRng::seed_from_u64(1);
@@ -108,134 +88,125 @@ fn main() {
     let merkle_hash = MerkleHash::new(poseidon24);
     let merkle_compress = MerkleCompress::new(poseidon16.clone());
 
-    let rs_domain_initial_reduction_factor = args.rs_domain_initial_reduction_factor;
+    for num_variables in 13..26 {
+        let num_coeffs = 1 << num_variables;
 
-    let num_coeffs = 1 << num_variables;
+        // Construct WHIR protocol parameters
+        let whir_params = ProtocolParameters {
+            initial_phase_config: InitialPhaseConfig::WithStatementClassic,
+            security_level,
+            pow_bits,
+            folding_factor: folding_factor.clone(),
+            merkle_hash: merkle_hash.clone(),
+            merkle_compress: merkle_compress.clone(),
+            soundness_type,
+            starting_log_inv_rate: starting_rate,
+            rs_domain_initial_reduction_factor,
+        };
 
-    // Construct WHIR protocol parameters
-    let whir_params = ProtocolParameters {
-        initial_phase_config: InitialPhaseConfig::WithStatementClassic,
-        security_level,
-        pow_bits,
-        folding_factor,
-        merkle_hash,
-        merkle_compress,
-        soundness_type,
-        starting_log_inv_rate: starting_rate,
-        rs_domain_initial_reduction_factor,
-    };
+        let params = WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(
+            num_variables,
+            whir_params.clone(),
+        );
 
-    let params = WhirConfig::<EF, F, MerkleHash, MerkleCompress, MyChallenger>::new(
-        num_variables,
-        whir_params.clone(),
-    );
+        let mut rng = StdRng::seed_from_u64(0);
+        let polynomial = EvaluationsList::<F>::new((0..num_coeffs).map(|_| rng.random()).collect());
 
-    let mut rng = StdRng::seed_from_u64(0);
-    let polynomial = EvaluationsList::<F>::new((0..num_coeffs).map(|_| rng.random()).collect());
+        let mut points: Vec<_> = vec![];
 
-    // Sample `num_points` random multilinear points in the Boolean hypercube
-    let points: Vec<_> = (0..num_evaluations)
-        .map(|_| MultilinearPoint::rand(&mut rng, num_variables))
-        .collect();
+        // Add all-ones and all-zeros points
+        points.push(MultilinearPoint(vec![EF::ONE; num_variables]));
 
-    // Construct a new statement with the correct number of variables
-    let mut statement = EqStatement::<EF>::initialize(num_variables);
+        // Construct statement with equality constraints
+        let mut statement = EqStatement::<EF>::initialize(num_variables);
 
-    // Add constraints for each sampled point (equality constraints)
-    for point in &points {
-        statement.add_unevaluated_constraint_hypercube(point.clone(), &polynomial);
+        for point in &points {
+            statement.add_unevaluated_constraint_hypercube(point.clone(), &polynomial);
+        }
+
+        // Define the Fiat-Shamir domain separator pattern
+        let mut domainsep = DomainSeparator::new(vec![]);
+        domainsep.commit_statement::<_, _, _, 32>(&params);
+        domainsep.add_whir_proof::<_, _, _, 32>(&params);
+
+        let challenger = MyChallenger::new(poseidon16.clone());
+        let dft = Radix2DFTSmallBatch::<F>::new(1 << params.max_fft_size());
+
+        let mut commit_time: Duration = Default::default();
+        let mut opening_time: Duration = Default::default();
+
+        for _ in 0..n_reps {
+            let mut prover_challenger = challenger.clone();
+            let mut prover_state = domainsep.to_prover_state(challenger.clone());
+            domainsep.observe_domain_separator(&mut prover_challenger);
+
+            let committer = CommitmentWriter::new(&params);
+            let mut proof =
+                WhirProof::<F, EF, 8>::from_protocol_parameters(&whir_params, num_variables);
+
+            let time = Instant::now();
+            let witness = committer
+                .commit(
+                    &dft,
+                    &mut prover_state,
+                    &mut proof,
+                    &mut prover_challenger,
+                    polynomial.clone(),
+                )
+                .unwrap();
+            commit_time += time.elapsed();
+
+            let prover = Prover(&params);
+
+            let time = Instant::now();
+            prover
+                .prove(
+                    &dft,
+                    &mut prover_state,
+                    &mut proof,
+                    &mut prover_challenger,
+                    statement.clone(),
+                    witness,
+                )
+                .unwrap();
+            opening_time += time.elapsed();
+
+            // Verify to ensure correctness
+            let commitment_reader = CommitmentReader::new(&params);
+            let verifier = Verifier::new(&params);
+
+            let mut verifier_challenger = challenger.clone();
+            let mut verifier_state =
+                domainsep.to_verifier_state(prover_state.proof_data().to_vec(), challenger.clone());
+
+            let parsed_commitment = commitment_reader
+                .parse_commitment::<8>(&mut verifier_state, &proof, &mut verifier_challenger)
+                .unwrap();
+
+            verifier
+                .verify(
+                    &mut verifier_state,
+                    &parsed_commitment,
+                    statement.clone(),
+                    &proof,
+                    &mut verifier_challenger,
+                )
+                .unwrap();
+        }
+
+        commit_time /= n_reps as u32;
+        opening_time /= n_reps as u32;
+
+        let total_time = commit_time + opening_time;
+
+        let total_time_per_field_element = total_time.as_secs_f64() / (1 << num_variables) as f64;
+
+        println!(
+            "num WHIR variables = {}, time per field element (commit + open): {:.3} µs",
+            num_variables,
+            total_time_per_field_element * 1e6
+        );
     }
 
-    // Define the Fiat-Shamir domain separator pattern for committing and proving
-    let mut domainsep = DomainSeparator::new(vec![]);
-    domainsep.commit_statement::<_, _, _, 32>(&params);
-    domainsep.add_whir_proof::<_, _, _, 32>(&params);
-
-    println!("=========================================");
-    println!("Whir (PCS) 🌪️");
-    if !params.check_pow_bits() {
-        println!("WARN: more PoW bits required than what specified.");
-    }
-
-    let challenger = MyChallenger::new(poseidon16);
-    let mut prover_challenger = challenger.clone();
-
-    // Initialize the Merlin transcript from the IOPattern
-    let mut prover_state = domainsep.to_prover_state(challenger.clone());
-    domainsep.observe_domain_separator(&mut prover_challenger);
-
-    // Commit to the polynomial and produce a witness
-    let committer = CommitmentWriter::new(&params);
-
-    let dft = Radix2DFTSmallBatch::<F>::new(1 << params.max_fft_size());
-
-    let mut proof = WhirProof::<F, EF, 8>::from_protocol_parameters(&whir_params, num_variables);
-
-    let time = Instant::now();
-    let witness = committer
-        .commit(
-            &dft,
-            &mut prover_state,
-            &mut proof,
-            &mut prover_challenger,
-            polynomial,
-        )
-        .unwrap();
-    let commit_time = time.elapsed();
-
-    // Generate a proof using the prover
-    let prover = Prover(&params);
-
-    // Generate a proof for the given statement and witness
-    let time = Instant::now();
-    prover
-        .prove(
-            &dft,
-            &mut prover_state,
-            &mut proof,
-            &mut prover_challenger,
-            statement.clone(),
-            witness,
-        )
-        .unwrap();
-
-    let opening_time = time.elapsed();
-
-    // Create a commitment reader
-    let commitment_reader = CommitmentReader::new(&params);
-
-    // Create a verifier with matching parameters
-    let verifier = Verifier::new(&params);
-
-    // Reconstruct verifier's view of the transcript using the DomainSeparator and prover's data
-    let mut verifier_challenger = challenger.clone();
-    let mut verifier_state =
-        domainsep.to_verifier_state(prover_state.proof_data().to_vec(), challenger);
-
-    // Parse the commitment
-    let parsed_commitment = commitment_reader
-        .parse_commitment::<8>(&mut verifier_state, &proof, &mut verifier_challenger)
-        .unwrap();
-
-    let verif_time = Instant::now();
-    verifier
-        .verify(
-            &mut verifier_state,
-            &parsed_commitment,
-            statement,
-            &proof,
-            &mut verifier_challenger,
-        )
-        .unwrap();
-    let verify_time = verif_time.elapsed();
-
-    println!(
-        "\nProving time: {} ms (commit: {} ms, opening: {} ms)",
-        commit_time.as_millis() + opening_time.as_millis(),
-        commit_time.as_millis(),
-        opening_time.as_millis()
-    );
-    let proof_size = prover_state.proof_data().len() as f64 * (F::ORDER_U64 as f64).log2() / 8.0;
-    println!("proof size: {:.2} KiB", proof_size / 1024.0);
-    println!("Verification time: {} μs", verify_time.as_micros());
+    println!("(num repetitions per setting: {})", n_reps);
 }
