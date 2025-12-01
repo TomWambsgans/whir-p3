@@ -925,6 +925,7 @@ dependencies = [
  "backend",
  "constraints-folder",
  "fiat-shamir",
+ "itertools 0.13.0",
  "p3-air",
  "p3-field",
  "p3-util 0.3.0 (git+https://github.com/TomWambsgans/Plonky3.git?branch=modular-precompiles)",
