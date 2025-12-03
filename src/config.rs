@@ -163,23 +163,6 @@ pub struct WhirConfig<EF: Field> {
     pub final_folding_pow_bits: usize,
 }
 
-#[allow(clippy::too_many_lines)]
-pub fn second_batched_whir_config_builder(
-    params_a: WhirConfigBuilder,
-    num_variables_a: usize,
-    num_variables_b: usize,
-) -> WhirConfigBuilder
-{
-    let var_diff = num_variables_a.checked_sub(num_variables_b).unwrap();
-
-    assert!(num_variables_a >= num_variables_b, "TODO");
-    assert!(params_a.folding_factor.first_round > var_diff);
-    let mut params_b = params_a;
-    params_b.folding_factor.first_round -= var_diff;
-    params_b.rs_domain_initial_reduction_factor = 0; // will not be used anyway
-    params_b
-}
-
 impl<EF> WhirConfig<EF>
 where
     EF: Field,

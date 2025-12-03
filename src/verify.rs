@@ -85,175 +85,6 @@ where
     PF<EF>: TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn batch_verify<F: TwoAdicField>(
-        &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        parsed_commitment_a: &ParsedCommitment<F, EF>,
-        statement_a: Vec<Evaluation<EF>>,
-        parsed_commitment_b: &ParsedCommitment<EF, EF>,
-        statement_b: Vec<Evaluation<EF>>,
-    ) -> ProofResult<MultilinearPoint<EF>>
-    where
-        EF: ExtensionField<F>,
-        F: ExtensionField<PF<EF>>,
-    {
-        assert!(
-            statement_a
-                .iter()
-                .all(|c| c.point.len() == parsed_commitment_a.num_variables)
-        );
-        assert!(
-            statement_b
-                .iter()
-                .all(|c| c.point.len() == parsed_commitment_b.num_variables)
-        );
-
-        let mut round_constraints = Vec::new();
-        let mut round_folding_randomness = Vec::new();
-        let mut claimed_sum = EF::ZERO;
-        let mut prev_commitment = None;
-
-        // Combine OODS and statement constraints to claimed_sum
-        let mut constraints: Vec<_> = parsed_commitment_a
-            .oods_constraints()
-            .into_iter()
-            .chain(statement_a)
-            .map(|mut c| {
-                c.point.insert(0, EF::ONE);
-                c
-            })
-            .collect();
-
-        constraints.extend(
-            parsed_commitment_b
-                .oods_constraints()
-                .into_iter()
-                .chain(statement_b)
-                .map(|mut c| {
-                    let ending_zeros =
-                        parsed_commitment_a.num_variables + 1 - parsed_commitment_b.num_variables;
-                    c.point.splice(0..0, vec![EF::ZERO; ending_zeros]);
-                    c
-                }),
-        );
-
-        let combination_randomness =
-            self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
-        round_constraints.push((combination_randomness, constraints));
-
-        // Initial sumcheck
-        let folding_randomness = verify_sumcheck_rounds::<F, EF>(
-            verifier_state,
-            &mut claimed_sum,
-            self.folding_factor.at_round(0) + 1,
-            self.starting_folding_pow_bits,
-        )?;
-        round_folding_randomness.push(folding_randomness);
-
-        for round_index in 0..self.n_rounds() {
-            // Fetch round parameters from config
-            let round_params = &self.round_parameters[round_index];
-
-            // Receive commitment to the folded polynomial (likely encoded at higher expansion)
-            let new_commitment = ParsedCommitment::<F, EF>::parse(
-                verifier_state,
-                round_params.num_variables,
-                round_params.ood_samples,
-            )?;
-
-            // Verify in-domain challenges on the previous commitment.
-            let stir_constraints = if round_index == 0 {
-                self.verify_stir_challenges_batched::<F>(
-                    verifier_state,
-                    round_params,
-                    parsed_commitment_a,
-                    parsed_commitment_b,
-                    round_folding_randomness.last().unwrap(),
-                    round_index,
-                )?
-            } else {
-                self.verify_stir_challenges(
-                    verifier_state,
-                    round_params,
-                    prev_commitment.as_ref().unwrap(),
-                    round_folding_randomness.last().unwrap(),
-                    round_index,
-                )?
-            };
-
-            // Add out-of-domain and in-domain constraints to claimed_sum
-            let constraints: Vec<Evaluation<EF>> = new_commitment
-                .oods_constraints()
-                .into_iter()
-                .chain(stir_constraints.into_iter())
-                .collect();
-
-            let combination_randomness =
-                self.combine_constraints(verifier_state, &mut claimed_sum, &constraints)?;
-            round_constraints.push((combination_randomness.clone(), constraints));
-
-            let folding_randomness = verify_sumcheck_rounds::<F, EF>(
-                verifier_state,
-                &mut claimed_sum,
-                self.folding_factor.at_round(round_index + 1),
-                round_params.folding_pow_bits,
-            )?;
-
-            round_folding_randomness.push(folding_randomness);
-
-            // Update round parameters
-            prev_commitment = Some(new_commitment);
-        }
-
-        // In the final round we receive the full polynomial instead of a commitment.
-        let n_final_coeffs = 1 << self.n_vars_of_final_polynomial();
-        let final_evaluations = verifier_state.next_extension_scalars_vec(n_final_coeffs)?;
-
-        // Verify in-domain challenges on the previous commitment.
-        let stir_constraints = self.verify_stir_challenges(
-            verifier_state,
-            &self.final_round_config(),
-            prev_commitment.as_ref().unwrap(),
-            round_folding_randomness.last().unwrap(),
-            self.n_rounds(),
-        )?;
-
-        // Verify stir constraints directly on final polynomial
-        stir_constraints
-            .iter()
-            .all(|c| verify_constraint(c, &final_evaluations))
-            .then_some(())
-            .ok_or(ProofError::InvalidProof)?;
-
-        let final_sumcheck_randomness = verify_sumcheck_rounds::<F, EF>(
-            verifier_state,
-            &mut claimed_sum,
-            self.final_sumcheck_rounds,
-            self.final_folding_pow_bits,
-        )?;
-        round_folding_randomness.push(final_sumcheck_randomness.clone());
-
-        // Compute folding randomness across all rounds.
-        let folding_randomness = MultilinearPoint(
-            round_folding_randomness
-                .into_iter()
-                .flat_map(|poly| poly.0.into_iter())
-                .collect(),
-        );
-
-        let evaluation_of_weights =
-            self.eval_constraints_poly(&round_constraints, folding_randomness.clone(), true);
-
-        // Check the final sumcheck evaluation
-        let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
-        if claimed_sum != evaluation_of_weights * final_value {
-            return Err(ProofError::InvalidProof);
-        }
-
-        Ok(folding_randomness)
-    }
-
-    #[allow(clippy::too_many_lines)]
     pub fn verify<F: TwoAdicField>(
         &self,
         verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
@@ -378,7 +209,7 @@ where
         );
 
         let evaluation_of_weights =
-            self.eval_constraints_poly(&round_constraints, folding_randomness.clone(), false);
+            self.eval_constraints_poly(&round_constraints, folding_randomness.clone());
 
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
@@ -468,100 +299,6 @@ where
         let folds: Vec<_> = answers
             .into_iter()
             .map(|answers| answers.evaluate(folding_randomness))
-            .collect();
-
-        let stir_constraints = stir_challenges_indexes
-            .iter()
-            .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
-            .zip(&folds)
-            .map(|(point, &value)| {
-                Evaluation::new(
-                    MultilinearPoint::expand_from_univariate(EF::from(point), params.num_variables),
-                    value,
-                )
-            })
-            .collect();
-
-        Ok(stir_constraints)
-    }
-
-    fn verify_stir_challenges_batched<F: Field>(
-        &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
-        params: &RoundConfig<EF>,
-        commitment_a: &ParsedCommitment<F, EF>,
-        commitment_b: &ParsedCommitment<EF, EF>,
-        folding_randomness: &MultilinearPoint<EF>,
-        round_index: usize,
-    ) -> ProofResult<Vec<Evaluation<EF>>>
-    where
-        EF: ExtensionField<F>,
-        F: ExtensionField<PF<EF>>,
-    {
-        let leafs_base_field = round_index == 0;
-
-        verifier_state.check_pow_grinding(params.pow_bits)?;
-
-        let stir_challenges_indexes = get_challenge_stir_queries(
-            params.domain_size >> params.folding_factor,
-            params.num_queries,
-            verifier_state,
-        );
-
-        // dbg!(&stir_challenges_indexes);
-        // dbg!(verifier_state.challenger().state());
-
-        let dimensions_a = vec![Dimensions {
-            height: params.domain_size >> params.folding_factor,
-            width: 1 << params.folding_factor,
-        }];
-        let answers_a = self.verify_merkle_proof::<F>(
-            verifier_state,
-            &commitment_a.root,
-            &stir_challenges_indexes,
-            &dimensions_a,
-            leafs_base_field,
-            round_index,
-            0,
-        )?;
-
-        // WE ASSUME FOR SIMPLICITY THAT LOG_INV_RATE_A = LOG_INV_RATE_B
-        let vars_diff = commitment_a.num_variables - commitment_b.num_variables;
-        assert!(vars_diff < params.folding_factor);
-        let dimensions_b = vec![Dimensions {
-            height: params.domain_size >> params.folding_factor,
-            width: 1 << (params.folding_factor - vars_diff),
-        }];
-        let answers_b = self
-            .verify_merkle_proof::<EF>(
-                verifier_state,
-                &commitment_b.root,
-                &stir_challenges_indexes,
-                &dimensions_b,
-                false,
-                round_index,
-                vars_diff,
-            )
-            .unwrap();
-
-        // Compute STIR Constraints
-        let folds: Vec<_> = answers_a
-            .into_iter()
-            .zip(answers_b)
-            .map(|(answer_a, answer_b)| {
-                let vars_a = log2_strict_usize(answer_a.len());
-                let vars_b = log2_strict_usize(answer_b.len());
-                let a_trunc = folding_randomness[1..].to_vec();
-                let eval_a = answer_a.evaluate(&MultilinearPoint(a_trunc));
-                let b_trunc = folding_randomness[vars_a - vars_b + 1..].to_vec();
-                let eval_b = answer_b.evaluate(&MultilinearPoint(b_trunc));
-                let last_fold_rand_a = folding_randomness[0];
-                let last_fold_rand_b = folding_randomness[..vars_a - vars_b + 1]
-                    .iter()
-                    .map(|&x| EF::ONE - x)
-                    .product::<EF>();
-                eval_a * last_fold_rand_a + eval_b * last_fold_rand_b
-            })
             .collect();
 
         let stir_constraints = stir_challenges_indexes
@@ -683,17 +420,13 @@ where
         &self,
         constraints: &[(Vec<EF>, Vec<Evaluation<EF>>)],
         mut point: MultilinearPoint<EF>,
-        batched: bool,
     ) -> EF {
         let mut value = EF::ZERO;
 
         for (round, (randomness, constraints)) in constraints.iter().enumerate() {
             assert_eq!(randomness.len(), constraints.len());
             if round > 0 {
-                let mut k = self.folding_factor.at_round(round - 1);
-                if round == 1 && batched {
-                    k += 1;
-                }
+                let k = self.folding_factor.at_round(round - 1);
                 point = MultilinearPoint(point[k..].to_vec());
             }
             value += constraints
