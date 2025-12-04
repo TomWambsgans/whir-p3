@@ -91,7 +91,7 @@ fn main() {
 
     let challenger = MyChallenger::new(poseidon16);
 
-    let mut prover_state = ProverState::new(challenger.clone());
+    let mut prover_state = ProverState::new(challenger.clone(), false);
 
     precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 

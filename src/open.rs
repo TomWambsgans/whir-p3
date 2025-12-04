@@ -253,7 +253,9 @@ where
 
             // merkle authentication proof
             for merkle_proof in &merkle_proofs {
-                prover_state.hint_merkle_path(merkle_proof.to_vec());
+                for digest in merkle_proof {
+                    prover_state.hint_base_scalars(digest);
+                }
             }
         }
 
@@ -341,7 +343,9 @@ fn open_merkle_tree_at_challenges<EF: ExtensionField<PF<EF>>>(
 
     // merkle authentication proof
     for merkle_proof in &merkle_proofs {
-        prover_state.hint_merkle_path(merkle_proof.to_vec());
+        for digest in merkle_proof {
+            prover_state.hint_base_scalars(digest);
+        }
     }
 
     answers
