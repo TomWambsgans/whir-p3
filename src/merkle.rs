@@ -34,11 +34,15 @@ type MerkleTreeMmcsKoalaBear = MerkleTreeMmcs<
 >;
 type KoalaBearExtensionMmcs<EF> = ExtensionMmcs<KoalaBear, EF, MerkleTreeMmcsKoalaBear>;
 
-fn get_koala_bear_mmcs<EF: ExtensionField<KoalaBear>>() -> KoalaBearExtensionMmcs<EF> {
+
+fn get_koala_bear_mmcs() -> MerkleTreeMmcsKoalaBear {
     let merkle_hash = MerkleHashKoalaBear::new(default_koalabear_poseidon2_24());
     let merkle_compress = MerkleCompressKoalaBear::new(default_koalabear_poseidon2_16());
-    let mmcs = MerkleTreeMmcsKoalaBear::new(merkle_hash, merkle_compress);
-    KoalaBearExtensionMmcs::new(mmcs)
+    MerkleTreeMmcsKoalaBear::new(merkle_hash, merkle_compress)
+}
+
+fn get_koala_bear_extension_mmcs<EF: ExtensionField<KoalaBear>>() -> KoalaBearExtensionMmcs<EF> {
+    KoalaBearExtensionMmcs::new(get_koala_bear_mmcs())
 }
 
 pub(crate) fn merkle_commit<F: Field, EF: ExtensionField<F>>(
@@ -48,13 +52,13 @@ pub(crate) fn merkle_commit<F: Field, EF: ExtensionField<F>>(
         let matrix =
             unsafe { std::mem::transmute::<_, DenseMatrix<QuinticExtensionFieldKB>>(matrix) };
         let (root, merkle_tree) =
-            get_koala_bear_mmcs::<QuinticExtensionFieldKB>().commit_matrix(matrix);
+            get_koala_bear_extension_mmcs::<QuinticExtensionFieldKB>().commit_matrix(matrix);
         let root = unsafe { std::mem::transmute_copy::<_, [F; DIGEST_ELEMS]>(&root) };
         let merkle_tree = unsafe { std::mem::transmute::<_, RoundMerkleTree<F, EF>>(merkle_tree) };
         (root, merkle_tree)
     } else if TypeId::of::<(F, EF)>() == TypeId::of::<(KoalaBear, KoalaBear)>() {
         let matrix = unsafe { std::mem::transmute::<_, DenseMatrix<KoalaBear>>(matrix) };
-        let (root, merkle_tree) = get_koala_bear_mmcs::<KoalaBear>().commit_matrix(matrix);
+        let (root, merkle_tree) = get_koala_bear_mmcs().commit_matrix(matrix);
         let root = unsafe { std::mem::transmute_copy::<_, [F; DIGEST_ELEMS]>(&root) };
         let merkle_tree = unsafe { std::mem::transmute::<_, RoundMerkleTree<F, EF>>(merkle_tree) };
         (root, merkle_tree)
@@ -65,7 +69,7 @@ pub(crate) fn merkle_commit<F: Field, EF: ExtensionField<F>>(
             std::mem::transmute::<_, DenseMatrix<BinomialExtensionField<KoalaBear, 4>>>(matrix)
         };
         let (root, merkle_tree) =
-            get_koala_bear_mmcs::<BinomialExtensionField<KoalaBear, 4>>().commit_matrix(matrix);
+            get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>().commit_matrix(matrix);
         let root = unsafe { std::mem::transmute_copy::<_, [F; DIGEST_ELEMS]>(&root) };
         let merkle_tree = unsafe { std::mem::transmute::<_, RoundMerkleTree<F, EF>>(merkle_tree) };
         (root, merkle_tree)
@@ -85,7 +89,7 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
             )
         };
         let mut batch_opening =
-            get_koala_bear_mmcs::<QuinticExtensionFieldKB>().open_batch(index, merkle_tree);
+            get_koala_bear_extension_mmcs::<QuinticExtensionFieldKB>().open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
         let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };
@@ -95,7 +99,7 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
         let merkle_tree = unsafe {
             std::mem::transmute::<_, &RoundMerkleTree<KoalaBear, KoalaBear>>(merkle_tree)
         };
-        let mut batch_opening = get_koala_bear_mmcs::<KoalaBear>().open_batch(index, merkle_tree);
+        let mut batch_opening = get_koala_bear_extension_mmcs::<KoalaBear>().open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
         let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };
@@ -110,7 +114,7 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
                 &RoundMerkleTree<KoalaBear, BinomialExtensionField<KoalaBear, 4>>,
             >(merkle_tree)
         };
-        let mut batch_opening = get_koala_bear_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
+        let mut batch_opening = get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
             .open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
@@ -134,7 +138,7 @@ pub(crate) fn merkle_verify<F: Field, EF: ExtensionField<F>>(
             unsafe { std::mem::transmute_copy::<_, [KoalaBear; DIGEST_ELEMS]>(&merkle_root) };
         let data = unsafe { std::mem::transmute::<_, Vec<QuinticExtensionFieldKB>>(data) };
         let proof = unsafe { std::mem::transmute::<_, &Vec<[KoalaBear; DIGEST_ELEMS]>>(proof) };
-        get_koala_bear_mmcs::<QuinticExtensionFieldKB>()
+        get_koala_bear_extension_mmcs::<QuinticExtensionFieldKB>()
             .verify_batch(
                 &merkle_root.into(),
                 &[dimension],
@@ -150,7 +154,7 @@ pub(crate) fn merkle_verify<F: Field, EF: ExtensionField<F>>(
             unsafe { std::mem::transmute_copy::<_, [KoalaBear; DIGEST_ELEMS]>(&merkle_root) };
         let data = unsafe { std::mem::transmute::<_, Vec<KoalaBear>>(data) };
         let proof = unsafe { std::mem::transmute::<_, &Vec<[KoalaBear; DIGEST_ELEMS]>>(proof) };
-        get_koala_bear_mmcs::<KoalaBear>()
+        get_koala_bear_extension_mmcs::<KoalaBear>()
             .verify_batch(
                 &merkle_root.into(),
                 &[dimension],
@@ -169,7 +173,7 @@ pub(crate) fn merkle_verify<F: Field, EF: ExtensionField<F>>(
         let data =
             unsafe { std::mem::transmute::<_, Vec<BinomialExtensionField<KoalaBear, 4>>>(data) };
         let proof = unsafe { std::mem::transmute::<_, &Vec<[KoalaBear; DIGEST_ELEMS]>>(proof) };
-        get_koala_bear_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
+        get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
             .verify_batch(
                 &merkle_root.into(),
                 &[dimension],
