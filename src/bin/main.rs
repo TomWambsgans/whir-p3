@@ -8,6 +8,8 @@ use p3_koala_bear::{
 };
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use tracing_forest::{ForestLayer, util::LevelFilter};
+use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 // use tracing_forest::{ForestLayer, util::LevelFilter};
 // use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use whir_p3::*;
@@ -28,14 +30,14 @@ type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 comp
 type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
-    // let env_filter: EnvFilter = EnvFilter::builder()
-    //     .with_default_directive(LevelFilter::INFO.into())
-    //     .from_env_lossy();
+    let env_filter: EnvFilter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
 
-    // Registry::default()
-    //     .with(env_filter)
-    //     .with(ForestLayer::default())
-    //     .init();
+    Registry::default()
+        .with(env_filter)
+        .with(ForestLayer::default())
+        .init();
 
     let poseidon16 = default_koalabear_poseidon2_16();
 
