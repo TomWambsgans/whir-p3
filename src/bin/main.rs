@@ -6,7 +6,6 @@ use p3_field::{PrimeCharacteristicRing, PrimeField64};
 use p3_koala_bear::{
     KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB, default_koalabear_poseidon2_16,
 };
-use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use tracing_forest::{ForestLayer, util::LevelFilter};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
@@ -23,10 +22,7 @@ type EF = QuinticExtensionFieldKB;
 type EFPrimeSubfield = <EF as PrimeCharacteristicRing>::PrimeSubfield;
 
 type Poseidon16 = Poseidon2KoalaBear<16>;
-type Poseidon24 = Poseidon2KoalaBear<24>;
 
-type MerkleHash = PaddingFreeSponge<Poseidon24, 24, 16, 8>; // leaf hashing
-type MerkleCompress = TruncatedPermutation<Poseidon16, 2, 8, 16>; // 2-to-1 compression
 type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
