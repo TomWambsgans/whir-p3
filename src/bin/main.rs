@@ -1,8 +1,7 @@
 use std::time::Instant;
 
 use multilinear_toolkit::prelude::*;
-use p3_challenger::DuplexChallenger;
-use p3_field::{PrimeCharacteristicRing, PrimeField64};
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::{
     KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB, default_koalabear_poseidon2_16,
 };
@@ -22,8 +21,6 @@ type EF = QuinticExtensionFieldKB;
 type EFPrimeSubfield = <EF as PrimeCharacteristicRing>::PrimeSubfield;
 
 type Poseidon16 = Poseidon2KoalaBear<16>;
-
-type MyChallenger = DuplexChallenger<EFPrimeSubfield, Poseidon16, 16, 8>;
 
 fn main() {
     let env_filter: EnvFilter = EnvFilter::builder()
@@ -87,9 +84,7 @@ fn main() {
         statement_a.push(Evaluation::new(point_a.clone(), eval));
     }
 
-    let challenger = MyChallenger::new(poseidon16);
-
-    let mut prover_state = ProverState::new(challenger.clone(), false);
+    let mut prover_state = ProverState::new(poseidon16.clone());
 
     precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
@@ -107,10 +102,9 @@ fn main() {
         &polynomial_a.by_ref(),
     );
     let opening_time_single = time.elapsed();
-    let proof_size_single =
-        prover_state.proof_size() as f64 * (EFPrimeSubfield::ORDER_U64 as f64).log2() / 8.0;
+    let proof_size_single = prover_state.proof_size_fe() as f64 * F::bits() as f64 / 8.0;
 
-    let mut verifier_state = VerifierState::new(prover_state.into_proof(), challenger);
+    let mut verifier_state = VerifierState::new(prover_state.into_proof(), poseidon16.clone());
 
     let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
 

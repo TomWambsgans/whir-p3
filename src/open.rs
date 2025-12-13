@@ -31,7 +31,7 @@ where
     #[instrument(name = "WHIR prove", skip_all)]
     pub fn prove(
         &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
         polynomial: &MleRef<'_, EF>,
@@ -62,7 +62,7 @@ where
     fn round(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()> {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
@@ -207,7 +207,7 @@ where
     fn final_round(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()> {
         // Directly send coefficients of the polynomial to the verifier.
@@ -279,7 +279,7 @@ where
     #[allow(clippy::type_complexity)]
     fn compute_stir_queries(
         &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         round_state: &RoundState<EF>,
         num_variables: usize,
         round_params: &RoundConfig<EF>,
@@ -317,7 +317,7 @@ where
 
 fn open_merkle_tree_at_challenges<EF: ExtensionField<PF<EF>>>(
     merkle_tree: &MerkleData<EF>,
-    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+    prover_state:  &mut impl FSProver<EF>,
     stir_challenges_indexes: &[usize],
 ) -> Vec<MleOwned<EF>> {
     let mut merkle_proofs = Vec::new();
@@ -425,7 +425,7 @@ where
     fn run_sumcheck_many_rounds(
         &mut self,
         prev_folding_scalar: Option<EF>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         n_rounds: usize,
         _pow_bits: usize, // TODO pow grinding
     ) -> MultilinearPoint<EF> {
@@ -455,7 +455,7 @@ where
         evals: &MleRef<'_, EF>,
         statement: &[Evaluation<EF>],
         combination_randomness: EF,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         folding_factor: usize,
         _pow_bits: usize, // TODO
     ) -> (Self, MultilinearPoint<EF>) {
@@ -507,7 +507,7 @@ where
 {
     pub(crate) fn initialize_first_round_state(
         prover: &WhirConfig<EF>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state:  &mut impl FSProver<EF>,
         mut statement: Vec<Evaluation<EF>>,
         witness: Witness<EF>,
         polynomial: &MleRef<'_, EF>,

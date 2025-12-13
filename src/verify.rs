@@ -17,7 +17,7 @@ pub struct ParsedCommitment<F: Field, EF: ExtensionField<F>> {
 
 impl<F: Field, EF: ExtensionField<F>> ParsedCommitment<F, EF> {
     pub fn parse(
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        verifier_state: &mut impl FSVerifier<EF>,
         num_variables: usize,
         ood_samples: usize,
     ) -> ProofResult<Self>
@@ -66,7 +66,7 @@ where
 {
     pub fn parse_commitment<F: TwoAdicField>(
         &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        verifier_state: &mut impl FSVerifier<EF>,
     ) -> ProofResult<ParsedCommitment<F, EF>>
     where
         EF: ExtensionField<F>,
@@ -87,7 +87,7 @@ where
     #[allow(clippy::too_many_lines)]
     pub fn verify<F: TwoAdicField>(
         &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        verifier_state: &mut impl FSVerifier<EF>,
         parsed_commitment: &ParsedCommitment<F, EF>,
         statement: Vec<Evaluation<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
@@ -238,7 +238,7 @@ where
     /// A vector of randomness values used to weight each constraint.
     pub(crate) fn combine_constraints(
         &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        verifier_state: &mut impl FSVerifier<EF>,
         claimed_sum: &mut EF,
         constraints: &[Evaluation<EF>],
     ) -> ProofResult<Vec<EF>> {
@@ -258,7 +258,7 @@ where
 
     fn verify_stir_challenges<F: Field>(
         &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        verifier_state: &mut impl FSVerifier<EF>,
         params: &RoundConfig<EF>,
         commitment: &ParsedCommitment<F, EF>,
         folding_randomness: &MultilinearPoint<EF>,
@@ -318,7 +318,7 @@ where
 
     fn verify_merkle_proof<F: Field>(
         &self,
-        verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+        verifier_state: &mut impl FSVerifier<EF>,
         root: &[PF<EF>; DIGEST_ELEMS],
         indices: &[usize],
         dimensions: &[Dimensions],
@@ -458,7 +458,7 @@ fn verify_constraint<EF: Field>(constraint: &Evaluation<EF>, poly: &[EF]) -> boo
 type SumcheckRandomness<F> = MultilinearPoint<F>;
 
 pub(crate) fn verify_sumcheck_rounds<F, EF>(
-    verifier_state: &mut VerifierState<PF<EF>, EF, impl FSChallenger<EF>>,
+    verifier_state: &mut impl FSVerifier<EF>,
     claimed_sum: &mut EF,
     rounds: usize,
     _pow_bits: usize,

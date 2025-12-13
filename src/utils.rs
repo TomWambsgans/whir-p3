@@ -23,7 +23,7 @@ pub(crate) fn get_challenge_stir_queries<F: Field, Chal: ChallengeSampler<F>>(
 ///
 /// This should be used on the prover side.
 pub(crate) fn sample_ood_points<EF: ExtensionField<PF<EF>>, E>(
-    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+    prover_state:  &mut impl FSProver<EF>,
     num_samples: usize,
     num_variables: usize,
     evaluate_fn: E,
