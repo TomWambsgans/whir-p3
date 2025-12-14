@@ -37,6 +37,7 @@ where
         // Generate OOD points from ProverState randomness
         for ood_point in &mut ood_points {
             *ood_point = prover_state.sample();
+            prover_state.duplexing();
         }
 
         // Evaluate the function at each OOD point

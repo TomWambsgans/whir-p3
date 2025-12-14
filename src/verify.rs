@@ -33,6 +33,7 @@ impl<F: Field, EF: ExtensionField<F>> ParsedCommitment<F, EF> {
         let ood_answers = if ood_samples > 0 {
             for ood_point in &mut ood_points {
                 *ood_point = verifier_state.sample();
+                verifier_state.duplexing();
             }
 
             verifier_state.next_extension_scalars_vec(ood_samples)?
