@@ -240,7 +240,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 [[package]]
 name = "fiat-shamir"
 version = "0.1.0"
-source = "git+https://github.com/leanEthereum/fiat-shamir.git?branch=lean-vm-simple#7cf5756dc7ae878170ebadba7b549648e87642e0"
+source = "git+https://github.com/leanEthereum/fiat-shamir.git?branch=lean-vm-simple#fa890ca018d2af4c837332fd4917ec05beddd470"
 dependencies = [
  "p3-field",
  "p3-symmetric",

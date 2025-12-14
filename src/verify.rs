@@ -215,8 +215,10 @@ where
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
         if claimed_sum != evaluation_of_weights * final_value {
-            panic!();
+            return Err(ProofError::InvalidProof);
         }
+
+        verifier_state.duplexing();
 
         Ok(folding_randomness)
     }
