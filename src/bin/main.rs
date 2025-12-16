@@ -50,7 +50,7 @@ fn main() {
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,
     };
-    let params_a = WhirConfig::new(params_a.clone(), num_variables_a);
+    let params_a = WhirConfig::new(&params_a, num_variables_a);
 
     let mut rng = StdRng::seed_from_u64(0);
     let mut polynomial_a = (0..num_coeffs_a)

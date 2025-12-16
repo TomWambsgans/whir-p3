@@ -169,7 +169,7 @@ where
     PF<EF>: TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(whir_parameters: WhirConfigBuilder, num_variables: usize) -> Self {
+    pub fn new(whir_parameters: &WhirConfigBuilder, num_variables: usize) -> Self {
         whir_parameters
             .folding_factor
             .check_validity(num_variables)
