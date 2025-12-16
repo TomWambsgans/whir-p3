@@ -96,11 +96,9 @@ where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
     {
-        assert!(
-            statement
-                .iter()
-                .all(|c| c.point.len() == parsed_commitment.num_variables)
-        );
+        statement
+            .iter()
+            .for_each(|c| assert_eq!(c.point.len(), parsed_commitment.num_variables));
 
         // During the rounds we collect constraints, combination randomness, folding randomness
         // and we update the claimed sum of constraint evaluation.
