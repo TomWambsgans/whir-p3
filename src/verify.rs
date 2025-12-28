@@ -49,13 +49,15 @@ impl<F: Field, EF: ExtensionField<F>> ParsedCommitment<F, EF> {
         })
     }
 
-    pub fn oods_constraints(&self) -> Vec<Evaluation<EF>> {
+    pub fn oods_constraints(&self) -> Vec<SparseStatement<EF>> {
         self.ood_points
             .iter()
             .zip(&self.ood_answers)
-            .map(|(&point, &eval)| Evaluation {
-                point: MultilinearPoint::expand_from_univariate(point, self.num_variables),
-                value: eval,
+            .map(|(&point, &eval)| {
+                SparseStatement::dense(
+                    MultilinearPoint::expand_from_univariate(point, self.num_variables),
+                    eval,
+                )
             })
             .collect()
     }
@@ -90,7 +92,7 @@ where
         &self,
         verifier_state: &mut impl FSVerifier<EF>,
         parsed_commitment: &ParsedCommitment<F, EF>,
-        statement: Vec<Evaluation<EF>>,
+        statement: Vec<SparseStatement<EF>>,
     ) -> ProofResult<MultilinearPoint<EF>>
     where
         EF: ExtensionField<F>,
@@ -98,7 +100,7 @@ where
     {
         statement
             .iter()
-            .for_each(|c| assert_eq!(c.point.len(), parsed_commitment.num_variables));
+            .for_each(|c| assert_eq!(c.total_num_variables, parsed_commitment.num_variables));
 
         // During the rounds we collect constraints, combination randomness, folding randomness
         // and we update the claimed sum of constraint evaluation.
@@ -147,7 +149,7 @@ where
             )?;
 
             // Add out-of-domain and in-domain constraints to claimed_sum
-            let constraints: Vec<Evaluation<EF>> = new_commitment
+            let constraints: Vec<SparseStatement<EF>> = new_commitment
                 .oods_constraints()
                 .into_iter()
                 .chain(stir_constraints)
@@ -213,7 +215,7 @@ where
         // Check the final sumcheck evaluation
         let final_value = final_evaluations.evaluate(&final_sumcheck_randomness);
         if claimed_sum != evaluation_of_weights * final_value {
-            return Err(ProofError::InvalidProof);
+            panic!();
         }
 
         verifier_state.duplexing();
@@ -221,38 +223,23 @@ where
         Ok(folding_randomness)
     }
 
-    /// Combine multiple constraints into a single claim using random linear combination.
-    ///
-    /// This method draws a challenge scalar from the Fiat-Shamir transcript and uses it
-    /// to generate a sequence of powers, one for each constraint. These powers serve as
-    /// coefficients in a random linear combination of the constraint sums.
-    ///
-    /// The resulting linear combination is added to `claimed_sum`, which becomes the new
-    /// target value to verify in the sumcheck protocol.
-    ///
-    /// # Arguments
-    /// - `verifier_state`: Fiat-Shamir transcript reader.
-    /// - `claimed_sum`: Mutable reference to the running sum of combined constraints.
-    /// - `constraints`: List of constraints to combine.
-    ///
-    /// # Returns
-    /// A vector of randomness values used to weight each constraint.
     pub(crate) fn combine_constraints(
         &self,
         verifier_state: &mut impl FSVerifier<EF>,
         claimed_sum: &mut EF,
-        constraints: &[Evaluation<EF>],
+        constraints: &[SparseStatement<EF>],
     ) -> ProofResult<Vec<EF>> {
         let combination_randomness_gen: EF = verifier_state.sample();
-        let combination_randomness: Vec<_> = combination_randomness_gen
-            .powers()
-            .take(constraints.len())
-            .collect();
-        *claimed_sum += constraints
-            .iter()
-            .zip(&combination_randomness)
-            .map(|(c, &rand)| rand * c.value)
-            .sum::<EF>();
+        let mut combination_randomness = vec![EF::ONE];
+        for smt in constraints {
+            for e in &smt.values {
+                let combination_randomness_pow = *combination_randomness.last().unwrap();
+                *claimed_sum += combination_randomness_pow * e.value;
+                combination_randomness
+                    .push(combination_randomness_pow * combination_randomness_gen);
+            }
+        }
+        combination_randomness.pop().unwrap();
 
         Ok(combination_randomness)
     }
@@ -264,7 +251,7 @@ where
         commitment: &ParsedCommitment<F, EF>,
         folding_randomness: &MultilinearPoint<EF>,
         round_index: usize,
-    ) -> ProofResult<Vec<Evaluation<EF>>>
+    ) -> ProofResult<Vec<SparseStatement<EF>>>
     where
         EF: ExtensionField<F>,
         F: ExtensionField<PF<EF>>,
@@ -307,7 +294,7 @@ where
             .map(|&index| params.folded_domain_gen.exp_u64(index as u64))
             .zip(&folds)
             .map(|(point, &value)| {
-                Evaluation::new(
+                SparseStatement::dense(
                     MultilinearPoint::expand_from_univariate(EF::from(point), params.num_variables),
                     value,
                 )
@@ -368,7 +355,7 @@ where
                     answers[i].clone(),
                     &merkle_proofs[i],
                 ) {
-                    return Err(ProofError::InvalidProof);
+                    panic!();
                 }
             }
 
@@ -413,7 +400,7 @@ where
                     answers[i].clone(),
                     &merkle_proofs[i],
                 ) {
-                    return Err(ProofError::InvalidProof);
+                    panic!();
                 }
             }
 
@@ -427,32 +414,48 @@ where
 
     fn eval_constraints_poly(
         &self,
-        constraints: &[(Vec<EF>, Vec<Evaluation<EF>>)],
+        constraints: &[(Vec<EF>, Vec<SparseStatement<EF>>)],
         mut point: MultilinearPoint<EF>,
     ) -> EF {
         let mut value = EF::ZERO;
 
         for (round, (randomness, constraints)) in constraints.iter().enumerate() {
-            assert_eq!(randomness.len(), constraints.len());
             if round > 0 {
                 let k = self.folding_factor.at_round(round - 1);
                 point = MultilinearPoint(point[k..].to_vec());
             }
-            value += constraints
-                .iter()
-                .zip(randomness)
-                .map(|(constraint, &randomness)| {
-                    let value = constraint.point.eq_poly_outside(&point);
-                    value * randomness
-                })
-                .sum::<EF>();
+            let mut i = 0;
+            for smt in constraints {
+                let common_eq = smt.point.eq_poly_outside(&MultilinearPoint(
+                    point[point.len() - smt.inner_num_variables()..].to_vec(),
+                ));
+                for e in &smt.values {
+                    let eval = (0..smt.selector_num_variables())
+                        .map(|j| {
+                            if e.selector & (1 << (smt.selector_num_variables() - 1 -j)) == 0 {
+                                EF::ONE - point[j]
+                            } else {
+                                point[j]
+                            }
+                        })
+                        .product::<EF>()
+                        * common_eq;
+                    value += eval * randomness[i];
+                    i += 1;
+                }
+            }
+            assert_eq!(i, randomness.len());
         }
         value
     }
 }
 
-fn verify_constraint<EF: Field>(constraint: &Evaluation<EF>, poly: &[EF]) -> bool {
-    poly.evaluate(&constraint.point) == constraint.value
+fn verify_constraint<EF: Field>(constraint: &SparseStatement<EF>, poly: &[EF]) -> bool {
+    // poly.evaluate(&constraint.point) == constraint.value
+    constraint
+        .values
+        .iter()
+        .all(|e| poly.evaluate_sparse(e.selector, &constraint.point) == e.value)
 }
 
 /// The full vector of folding randomness values, in reverse round order.
@@ -479,7 +482,7 @@ where
 
         // Verify claimed sum is consistent with polynomial
         if poly.evaluate(EF::ZERO) + poly.evaluate(EF::ONE) != *claimed_sum {
-            return Err(ProofError::InvalidProof);
+            panic!();
         }
 
         // TODO: re-enable PoW grinding

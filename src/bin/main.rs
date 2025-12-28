@@ -36,12 +36,10 @@ fn main() {
 
     type BaseField = F;
 
-    let num_variables_a = 25;
-    let num_coeffs_a = 1 << num_variables_a;
-    let num_non_zero_coeffs_a = num_coeffs_a * 3 / 5;
+    let num_variables = 14;
+    let num_coeffs = 1 << num_variables;
 
-    // Construct WHIR protocol parameters
-    let params_a = WhirConfigBuilder {
+    let params = WhirConfigBuilder {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: DEFAULT_MAX_POW,
@@ -50,83 +48,91 @@ fn main() {
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,
     };
-    let params_a = WhirConfig::new(&params_a, num_variables_a);
+    let params = WhirConfig::new(&params, num_variables);
 
     let mut rng = StdRng::seed_from_u64(0);
-    let mut polynomial_a = (0..num_coeffs_a)
+    let polynomial = (0..num_coeffs)
         .map(|_| rng.random())
         .collect::<Vec<BaseField>>();
-    polynomial_a[num_non_zero_coeffs_a..].fill(BaseField::ZERO);
 
     let random_sparse_point = |rng: &mut StdRng, num_variables: usize| {
-        let mut point = (0..num_variables)
+        let selector_len = rng.random_range(0..num_variables / 2);
+        let point = (0..num_variables - selector_len)
             .map(|_| rng.random())
             .collect::<Vec<EF>>();
-        let initial_booleans = rng.random_range(0..num_variables / 4);
-        for i in 0..initial_booleans {
-            point[i] = EF::from_usize(rng.random_range(0..2));
-        }
-        MultilinearPoint(point)
+        (selector_len, MultilinearPoint(point))
     };
 
     // Sample `num_points` random multilinear points in the Boolean hypercube
-    let mut points_a = (0..7)
-        .map(|_| random_sparse_point(&mut rng, num_variables_a))
+    let mut points = (0..7)
+        .map(|_| random_sparse_point(&mut rng, num_variables))
         .collect::<Vec<_>>();
-    points_a.push(MultilinearPoint(vec![EF::ONE; num_variables_a]));
-    points_a.push(MultilinearPoint(vec![EF::ZERO; num_variables_a]));
+    points.push((num_variables, MultilinearPoint(vec![])));
 
-    let mut statement_a = Vec::new();
+    let mut statement = Vec::new();
 
     // Add constraints for each sampled point (equality constraints)
-    for point_a in &points_a {
-        let eval = polynomial_a.evaluate(point_a);
-        statement_a.push(Evaluation::new(point_a.clone(), eval));
+    for (selector_len, point) in &points {
+        let num_selectors = rng.random_range(1..5);
+        let mut selectors = vec![];
+        for _ in 0..num_selectors {
+            let selector = rng.random_range(0..(1 << selector_len));
+            if !selectors.contains(&selector) {
+                selectors.push(selector);
+            }
+        }
+        statement.push(SparseStatement::new(
+            num_variables,
+            point.clone(),
+            selectors
+                .iter()
+                .map(|selector| SparseValue {
+                    selector: *selector,
+                    value: polynomial.evaluate_sparse(*selector, point),
+                })
+                .collect(),
+        ));
     }
 
     let mut prover_state = ProverState::new(poseidon16.clone());
 
     precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
-    let polynomial_a = MleOwned::Base(polynomial_a);
+    let polynomial = MleOwned::Base(polynomial);
     let time = Instant::now();
-    let witness_a = params_a.commit(&mut prover_state, &polynomial_a);
-    let commit_time_a = time.elapsed();
+    let witness = params.commit(&mut prover_state, &polynomial);
+    let commit_time = time.elapsed();
 
-    let witness_a_clone = witness_a.clone();
+    let witness_clone = witness.clone();
     let time = Instant::now();
-    params_a.prove(
+    params.prove(
         &mut prover_state,
-        statement_a.clone(),
-        witness_a_clone,
-        &polynomial_a.by_ref(),
+        statement.clone(),
+        witness_clone,
+        &polynomial.by_ref(),
     );
     let opening_time_single = time.elapsed();
     let proof_size_single = prover_state.proof_size_fe() as f64 * F::bits() as f64 / 8.0;
 
     let mut verifier_state = VerifierState::new(prover_state.into_proof(), poseidon16.clone());
 
-    let parsed_commitment_a = params_a.parse_commitment::<F>(&mut verifier_state).unwrap();
+    let parsed_commitment = params.parse_commitment::<F>(&mut verifier_state).unwrap();
 
-    params_a
-        .verify::<F>(
-            &mut verifier_state,
-            &parsed_commitment_a,
-            statement_a.clone(),
-        )
+    params
+        .verify::<F>(&mut verifier_state, &parsed_commitment, statement.clone())
         .unwrap();
 
     println!(
         "\nSingle proving time: {} ms (commit: {} ms, opening: {} ms)",
-        commit_time_a.as_millis() + opening_time_single.as_millis(),
-        commit_time_a.as_millis(),
+        commit_time.as_millis() + opening_time_single.as_millis(),
+        commit_time.as_millis(),
         opening_time_single.as_millis()
     );
 
     println!(
         "\nTotal proving time: {} ms (commit: {} ms, opening: {} ms)",
-        commit_time_a.as_millis() + opening_time_single.as_millis(),
-        commit_time_a.as_millis(),
+        commit_time.as_millis() + opening_time_single.as_millis(),
+        commit_time.as_millis(),
         opening_time_single.as_millis()
     );
     println!("proof size: {:.2} KiB", proof_size_single / 1024.0);
