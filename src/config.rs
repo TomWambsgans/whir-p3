@@ -527,23 +527,29 @@ impl SecurityAssumption {
         field_size_bits: usize,
         num_functions: usize,
     ) -> f64 {
-        // The error computed here is from [BCIKS20] for the combination of two functions. Then we multiply it by the folding factor.
         let log_eta = self.log_eta(log_inv_rate);
+
         // Note that this does not include the field_size
         let error = match self {
             // In UD the error is |L|/|F| = d/ρ*|F|
             Self::UniqueDecoding => (log_degree + log_inv_rate) as f64,
 
-            // In JB the error is degree^2/|F| * (2 * min{ 1 - √ρ - δ, √ρ/20 })^7
-            // Since δ = 1 - √ρ - η then 1 - √ρ - δ = η
-            // Thus the error is degree^2/|F| * (2 * min { η, √ρ/20 })^7
             Self::JohnsonBound => {
-                let numerator = (2 * log_degree) as f64;
-                let sqrt_rho_20 = 1. + LOG2_10 + 0.5 * log_inv_rate as f64;
-                numerator + 7. * (sqrt_rho_20.min(-log_eta) - 1.)
+                // see https://eprint.iacr.org/2025/2055.pdf
+                // TODO double check
+                let eta = 2_f64.powf(log_eta);
+                let rho = 1. / f64::from(1 << log_inv_rate);
+                let rho_sqrt = rho.sqrt();
+                let gamma = 1. - rho_sqrt - eta;
+                let n = f64::from(1 << (log_degree + log_inv_rate));
+                let m = (rho_sqrt / (2. * eta)).ceil().max(3.);
+                let num_1 = 2. * (m + 0.5).powi(5) + 3. * (m + 0.5) * gamma * rho * n;
+                let den_1 = 3. * rho * rho_sqrt;
+                let num_2 = m + 0.5;
+                let den_2 = rho_sqrt;
+                ((num_1 / den_1) + (num_2 / den_2)).log2()
             }
 
-            // In JB we assume the error is degree/η*ρ^2
             Self::CapacityBound => (log_degree + 2 * log_inv_rate) as f64 - log_eta,
         };
 

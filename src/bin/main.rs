@@ -36,19 +36,23 @@ fn main() {
 
     type BaseField = F;
 
-    let num_variables = 20;
+    let num_variables = 25;
     let num_coeffs = 1 << num_variables;
 
     let params = WhirConfigBuilder {
-        security_level: 128,
+        security_level: 123,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: 17,
         folding_factor: FoldingFactor::new(7, 4),
-        soundness_type: SecurityAssumption::CapacityBound,
+        soundness_type: SecurityAssumption::JohnsonBound,
         starting_log_inv_rate: 1,
         rs_domain_initial_reduction_factor: 5,
     };
     let params = WhirConfig::new(&params, num_variables);
+
+    for (i, round) in params.round_parameters.iter().enumerate() {
+        println!("round {}: {} queries", i, round.num_queries);
+    }
 
     let mut rng = StdRng::seed_from_u64(0);
     let polynomial = (0..num_coeffs)
