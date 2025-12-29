@@ -1184,7 +1184,6 @@ dependencies = [
  "proptest",
  "rand",
  "rayon",
- "thiserror",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",

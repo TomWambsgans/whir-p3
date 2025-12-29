@@ -36,13 +36,13 @@ fn main() {
 
     type BaseField = F;
 
-    let num_variables = 14;
+    let num_variables = 20;
     let num_coeffs = 1 << num_variables;
 
     let params = WhirConfigBuilder {
         security_level: 128,
         max_num_variables_to_send_coeffs: 6,
-        pow_bits: DEFAULT_MAX_POW,
+        pow_bits: 17,
         folding_factor: FoldingFactor::new(7, 4),
         soundness_type: SecurityAssumption::CapacityBound,
         starting_log_inv_rate: 1,
