@@ -127,14 +127,7 @@ fn main() {
         .unwrap();
 
     println!(
-        "\nSingle proving time: {} ms (commit: {} ms, opening: {} ms)",
-        commit_time.as_millis() + opening_time_single.as_millis(),
-        commit_time.as_millis(),
-        opening_time_single.as_millis()
-    );
-
-    println!(
-        "\nTotal proving time: {} ms (commit: {} ms, opening: {} ms)",
+        "\nProving time: {} ms (commit: {} ms, opening: {} ms)",
         commit_time.as_millis() + opening_time_single.as_millis(),
         commit_time.as_millis(),
         opening_time_single.as_millis()
