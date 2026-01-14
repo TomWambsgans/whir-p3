@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{any::TypeId, time::Instant};
 
 use multilinear_toolkit::prelude::*;
 use p3_field::PrimeCharacteristicRing;
@@ -34,19 +34,19 @@ fn main() {
 
     let poseidon16 = default_koalabear_poseidon2_16();
 
-    type BaseField = F;
+    type PolField = EF;
 
-    let num_variables = 25;
+    let num_variables = 17;
     let num_coeffs = 1 << num_variables;
 
     let params = WhirConfigBuilder {
         security_level: 123,
         max_num_variables_to_send_coeffs: 6,
         pow_bits: 17,
-        folding_factor: FoldingFactor::new(7, 4),
+        folding_factor: FoldingFactor::new(4, 4),
         soundness_type: SecurityAssumption::JohnsonBound,
-        starting_log_inv_rate: 1,
-        rs_domain_initial_reduction_factor: 5,
+        starting_log_inv_rate: 3,
+        rs_domain_initial_reduction_factor: 1,
     };
     let params = WhirConfig::new(&params, num_variables);
 
@@ -57,7 +57,7 @@ fn main() {
     let mut rng = StdRng::seed_from_u64(0);
     let polynomial = (0..num_coeffs)
         .map(|_| rng.random())
-        .collect::<Vec<BaseField>>();
+        .collect::<Vec<PolField>>();
 
     let random_sparse_point = |rng: &mut StdRng, num_variables: usize| {
         let selector_len = rng.random_range(0..num_variables / 2);
@@ -102,7 +102,12 @@ fn main() {
 
     precompute_dft_twiddles::<F>(1 << F::TWO_ADICITY);
 
-    let polynomial = MleOwned::Base(polynomial);
+    let polynomial: MleOwned<EF> = if TypeId::of::<PolField>() == TypeId::of::<EF>() {
+        MleOwned::Extension(unsafe { std::mem::transmute(polynomial) })
+    } else {
+        MleOwned::Base(unsafe { std::mem::transmute(polynomial) })
+    };
+
     let time = Instant::now();
     let witness = params.commit(&mut prover_state, &polynomial);
     let commit_time = time.elapsed();
@@ -120,10 +125,12 @@ fn main() {
 
     let mut verifier_state = VerifierState::new(prover_state.into_proof(), poseidon16.clone());
 
-    let parsed_commitment = params.parse_commitment::<F>(&mut verifier_state).unwrap();
+    let parsed_commitment = params
+        .parse_commitment::<PolField>(&mut verifier_state)
+        .unwrap();
 
     params
-        .verify::<F>(&mut verifier_state, &parsed_commitment, statement.clone())
+        .verify::<PolField>(&mut verifier_state, &parsed_commitment, statement.clone())
         .unwrap();
 
     println!(
