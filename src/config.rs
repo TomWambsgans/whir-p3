@@ -1,24 +1,6 @@
-use std::{f64::consts::LOG2_10, fmt::Display, str::FromStr};
-
 use multilinear_toolkit::prelude::*;
-use p3_field::{ExtensionField, Field, TwoAdicField};
-use thiserror::Error;
-
-pub const DEFAULT_MAX_POW: usize = 17;
-
-/// Errors that can occur when validating a folding factor.
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum FoldingFactorError {
-    /// The folding factor is larger than the number of variables.
-    #[error(
-        "Folding factor {0} is greater than the number of variables {1}. Polynomial too small, just send it directly."
-    )]
-    TooLarge(usize, usize),
-
-    /// The folding factor cannot be zero.
-    #[error("Folding factor shouldn't be zero.")]
-    ZeroFactor,
-}
+use p3_field::{Field, TwoAdicField};
+use std::f64::consts::LOG2_10;
 
 /// Defines the folding factor for polynomial commitments.
 #[derive(Debug, Clone, Copy)]
@@ -52,24 +34,13 @@ impl FoldingFactor {
         }
     }
 
-    /// Checks the validity of the folding factor against the number of variables.
-    pub const fn check_validity(&self, num_variables: usize) -> Result<(), FoldingFactorError> {
-        if self.first_round > num_variables {
-            // The first round folding factor must not exceed the available variables.
-            Err(FoldingFactorError::TooLarge(
-                self.first_round,
-                num_variables,
-            ))
-        } else if self.subsequent_round > num_variables {
-            // Subsequent round folding factors must also not exceed the available
-            // variables.
-            Err(FoldingFactorError::TooLarge(
-                self.subsequent_round,
-                num_variables,
-            ))
-        } else if self.subsequent_round == 0 || self.first_round == 0 {
-            // Folding should occur at least once; zero is not valid.
-            Err(FoldingFactorError::ZeroFactor)
+    pub const fn check_validity(&self, num_variables: usize) -> Result<(), ()> {
+        if self.first_round > num_variables
+            || self.subsequent_round > num_variables
+            || self.subsequent_round == 0
+            || self.first_round == 0
+        {
+            Err(())
         } else {
             Ok(())
         }
@@ -163,30 +134,13 @@ pub struct WhirConfig<EF: Field> {
     pub final_folding_pow_bits: usize,
 }
 
-#[allow(clippy::too_many_lines)]
-pub fn second_batched_whir_config_builder(
-    params_a: WhirConfigBuilder,
-    num_variables_a: usize,
-    num_variables_b: usize,
-) -> WhirConfigBuilder
-{
-    let var_diff = num_variables_a.checked_sub(num_variables_b).unwrap();
-
-    assert!(num_variables_a >= num_variables_b, "TODO");
-    assert!(params_a.folding_factor.first_round > var_diff);
-    let mut params_b = params_a;
-    params_b.folding_factor.first_round -= var_diff;
-    params_b.rs_domain_initial_reduction_factor = 0; // will not be used anyway
-    params_b
-}
-
 impl<EF> WhirConfig<EF>
 where
     EF: Field,
     PF<EF>: TwoAdicField,
 {
     #[allow(clippy::too_many_lines)]
-    pub fn new(whir_parameters: WhirConfigBuilder, num_variables: usize) -> Self {
+    pub fn new(whir_parameters: &WhirConfigBuilder, num_variables: usize) -> Self {
         whir_parameters
             .folding_factor
             .check_validity(num_variables)
@@ -408,27 +362,6 @@ where
             .all(|r| r.pow_bits <= max_bits && r.folding_pow_bits <= max_bits)
     }
 
-    // Compute the proximity gaps term of the fold
-    #[must_use]
-    pub const fn rbr_soundness_fold_prox_gaps(
-        soundness_type: SecurityAssumption,
-        field_size_bits: usize,
-        num_variables: usize,
-        log_inv_rate: usize,
-        log_eta: f64,
-    ) -> f64 {
-        // Recall, at each round we are only folding by two at a time
-        let error = match soundness_type {
-            SecurityAssumption::CapacityBound => (num_variables + log_inv_rate) as f64 - log_eta,
-            SecurityAssumption::JohnsonBound => {
-                LOG2_10 + 3.5 * log_inv_rate as f64 + 2. * num_variables as f64
-            }
-            SecurityAssumption::UniqueDecoding => (num_variables + log_inv_rate) as f64,
-        };
-
-        field_size_bits as f64 - error
-    }
-
     #[must_use]
     pub const fn rbr_soundness_fold_sumcheck(
         soundness_type: SecurityAssumption,
@@ -530,62 +463,6 @@ where
     }
 }
 
-impl<F> ToString for RoundConfig<F>
-where
-    F: Field,
-{
-    fn to_string(&self) -> String {
-        format!(
-            "RoundConfig:\n- Pow Bits: {}\n- Folding Pow Bits: {}\n- Num Queries: {}\n- OOD Samples: {}\n- Log Inv Rate: {}\n- Num Variables: {}\n- Folding Factor: {}\n- Domain Size: {}\n",
-            self.pow_bits,
-            self.folding_pow_bits,
-            self.num_queries,
-            self.ood_samples,
-            self.log_inv_rate,
-            self.num_variables,
-            self.folding_factor,
-            self.domain_size,
-        )
-    }
-}
-
-impl<EF> ToString for WhirConfig<EF>
-where
-    EF: ExtensionField<PF<EF>>,
-{
-    fn to_string(&self) -> String {
-        let mut s = String::new();
-        // committment_ood_samples
-        s += &format!(
-            "\nCommittment OOD Samples: {}\n",
-            self.committment_ood_samples
-        );
-        // starting_folding_pow_bits
-        s += &format!(
-            "Starting Folding PoW Bits: {}\n",
-            self.starting_folding_pow_bits
-        );
-        // folding_factor
-        s += &format!("Folding Factor: {:?}\n", self.folding_factor);
-        s += &format!(
-            "RS Domain Initial Reduction Factor: {}\n\n",
-            self.rs_domain_initial_reduction_factor
-        );
-
-        for (i, round_param) in self.round_parameters.iter().enumerate() {
-            s.push_str(&format!("Round {}:\n", i + 1));
-            s.push_str(&format!("{}\n", round_param.to_string()));
-        }
-
-        s += &format!("Final Queries: {}\n", self.final_queries);
-
-        s += &format!("Final PoW Bits: {}\n", self.final_pow_bits);
-        s += &format!("Final Folding PoW Bits: {}\n", self.final_folding_pow_bits);
-        s += &format!("Final Log Inverse Rate: {}\n", self.final_log_inv_rate);
-        s
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityAssumption {
     /// Unique decoding assumes that the distance of each oracle is within the UDR of the code.
@@ -614,7 +491,7 @@ impl SecurityAssumption {
     pub const fn log_eta(&self, log_inv_rate: usize) -> f64 {
         match self {
             // We don't use η in UD
-            Self::UniqueDecoding => 0., // TODO: Maybe just panic and avoid calling it in UD?
+            Self::UniqueDecoding => panic!(),
             // Set as √ρ/20
             Self::JohnsonBound => -(0.5 * log_inv_rate as f64 + LOG2_10 + 1.),
             // Set as ρ/20
@@ -650,23 +527,29 @@ impl SecurityAssumption {
         field_size_bits: usize,
         num_functions: usize,
     ) -> f64 {
-        // The error computed here is from [BCIKS20] for the combination of two functions. Then we multiply it by the folding factor.
         let log_eta = self.log_eta(log_inv_rate);
+
         // Note that this does not include the field_size
         let error = match self {
             // In UD the error is |L|/|F| = d/ρ*|F|
             Self::UniqueDecoding => (log_degree + log_inv_rate) as f64,
 
-            // In JB the error is degree^2/|F| * (2 * min{ 1 - √ρ - δ, √ρ/20 })^7
-            // Since δ = 1 - √ρ - η then 1 - √ρ - δ = η
-            // Thus the error is degree^2/|F| * (2 * min { η, √ρ/20 })^7
             Self::JohnsonBound => {
-                let numerator = (2 * log_degree) as f64;
-                let sqrt_rho_20 = 1. + LOG2_10 + 0.5 * log_inv_rate as f64;
-                numerator + 7. * (sqrt_rho_20.min(-log_eta) - 1.)
+                // see https://eprint.iacr.org/2025/2055.pdf
+                // TODO double check
+                let eta = 2_f64.powf(log_eta);
+                let rho = 1. / f64::from(1 << log_inv_rate);
+                let rho_sqrt = rho.sqrt();
+                let gamma = 1. - rho_sqrt - eta;
+                let n = f64::from(1 << (log_degree + log_inv_rate));
+                let m = (rho_sqrt / (2. * eta)).ceil().max(3.);
+                let num_1 = 2. * (m + 0.5).powi(5) + 3. * (m + 0.5) * gamma * rho * n;
+                let den_1 = 3. * rho * rho_sqrt;
+                let num_2 = m + 0.5;
+                let den_2 = rho_sqrt;
+                ((num_1 / den_1) + (num_2 / den_2)).log2()
             }
 
-            // In JB we assume the error is degree/η*ρ^2
             Self::CapacityBound => (log_degree + 2 * log_inv_rate) as f64 - log_eta,
         };
 
@@ -761,28 +644,5 @@ impl SecurityAssumption {
         }
 
         panic!("Could not find an appropriate number of OOD samples");
-    }
-}
-
-impl Display for SecurityAssumption {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::JohnsonBound => "JohnsonBound",
-            Self::CapacityBound => "CapacityBound",
-            Self::UniqueDecoding => "UniqueDecoding",
-        })
-    }
-}
-
-impl FromStr for SecurityAssumption {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "JohnsonBound" => Ok(Self::JohnsonBound),
-            "CapacityBound" => Ok(Self::CapacityBound),
-            "UniqueDecoding" => Ok(Self::UniqueDecoding),
-            _ => Err(format!("Invalid soundness specification: {s}")),
-        }
     }
 }

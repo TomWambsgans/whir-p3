@@ -7,7 +7,6 @@ use p3_commit::Mmcs;
 use p3_field::extension::BinomialExtensionField;
 use p3_koala_bear::{
     KoalaBear, Poseidon2KoalaBear, QuinticExtensionFieldKB, default_koalabear_poseidon2_16,
-    default_koalabear_poseidon2_24,
 };
 use p3_matrix::Dimensions;
 use p3_matrix::dense::DenseMatrix;
@@ -23,7 +22,7 @@ pub const DIGEST_ELEMS: usize = 8;
 pub(crate) type RoundMerkleTree<F, EF> =
     MerkleTree<F, F, FlatMatrixView<F, EF, DenseMatrix<EF>>, DIGEST_ELEMS>;
 
-type MerkleHashKoalaBear = PaddingFreeSponge<Poseidon2KoalaBear<24>, 24, 16, 8>; // leaf hashing
+type MerkleHashKoalaBear = PaddingFreeSponge<Poseidon2KoalaBear<16>, 16, 8, 8>; // leaf hashing
 type MerkleCompressKoalaBear = TruncatedPermutation<Poseidon2KoalaBear<16>, 2, 8, 16>; // 2-to-1 compression
 type MerkleTreeMmcsKoalaBear = MerkleTreeMmcs<
     PFPacking<KoalaBear>,
@@ -34,9 +33,8 @@ type MerkleTreeMmcsKoalaBear = MerkleTreeMmcs<
 >;
 type KoalaBearExtensionMmcs<EF> = ExtensionMmcs<KoalaBear, EF, MerkleTreeMmcsKoalaBear>;
 
-
 fn get_koala_bear_mmcs() -> MerkleTreeMmcsKoalaBear {
-    let merkle_hash = MerkleHashKoalaBear::new(default_koalabear_poseidon2_24());
+    let merkle_hash = MerkleHashKoalaBear::new(default_koalabear_poseidon2_16());
     let merkle_compress = MerkleCompressKoalaBear::new(default_koalabear_poseidon2_16());
     MerkleTreeMmcsKoalaBear::new(merkle_hash, merkle_compress)
 }
@@ -69,7 +67,8 @@ pub(crate) fn merkle_commit<F: Field, EF: ExtensionField<F>>(
             std::mem::transmute::<_, DenseMatrix<BinomialExtensionField<KoalaBear, 4>>>(matrix)
         };
         let (root, merkle_tree) =
-            get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>().commit_matrix(matrix);
+            get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
+                .commit_matrix(matrix);
         let root = unsafe { std::mem::transmute_copy::<_, [F; DIGEST_ELEMS]>(&root) };
         let merkle_tree = unsafe { std::mem::transmute::<_, RoundMerkleTree<F, EF>>(merkle_tree) };
         (root, merkle_tree)
@@ -88,8 +87,8 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
                 merkle_tree,
             )
         };
-        let mut batch_opening =
-            get_koala_bear_extension_mmcs::<QuinticExtensionFieldKB>().open_batch(index, merkle_tree);
+        let mut batch_opening = get_koala_bear_extension_mmcs::<QuinticExtensionFieldKB>()
+            .open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
         let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };
@@ -99,7 +98,8 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
         let merkle_tree = unsafe {
             std::mem::transmute::<_, &RoundMerkleTree<KoalaBear, KoalaBear>>(merkle_tree)
         };
-        let mut batch_opening = get_koala_bear_extension_mmcs::<KoalaBear>().open_batch(index, merkle_tree);
+        let mut batch_opening =
+            get_koala_bear_extension_mmcs::<KoalaBear>().open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
         let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };
@@ -114,8 +114,9 @@ pub(crate) fn merkle_open<F: Field, EF: ExtensionField<F>>(
                 &RoundMerkleTree<KoalaBear, BinomialExtensionField<KoalaBear, 4>>,
             >(merkle_tree)
         };
-        let mut batch_opening = get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
-            .open_batch(index, merkle_tree);
+        let mut batch_opening =
+            get_koala_bear_extension_mmcs::<BinomialExtensionField<KoalaBear, 4>>()
+                .open_batch(index, merkle_tree);
         let leaf = std::mem::take(&mut batch_opening.opened_values[0]);
         let proof = batch_opening.opening_proof;
         let leaf = unsafe { std::mem::transmute::<_, Vec<EF>>(leaf) };

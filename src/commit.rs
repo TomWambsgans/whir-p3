@@ -57,7 +57,7 @@ where
     #[instrument(skip_all)]
     pub fn commit(
         &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state: &mut impl FSProver<EF>,
         polynomial: &MleOwned<EF>,
     ) -> Witness<EF> {
         let folded_matrix = reorder_and_dft(

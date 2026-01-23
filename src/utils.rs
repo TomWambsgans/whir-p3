@@ -12,18 +12,16 @@ use crate::EvalsDft;
 pub(crate) fn get_challenge_stir_queries<F: Field, Chal: ChallengeSampler<F>>(
     folded_domain_size: usize,
     num_queries: usize,
-    prover_state: &mut Chal,
+    challenger: &mut Chal,
 ) -> Vec<usize> {
-    (0..num_queries)
-        .map(|_| prover_state.sample_bits(folded_domain_size.ilog2() as usize))
-        .collect()
+    challenger.sample_in_range(folded_domain_size.ilog2() as usize, num_queries)
 }
 
 /// A utility function to sample Out-of-Domain (OOD) points and evaluate them.
 ///
 /// This should be used on the prover side.
 pub(crate) fn sample_ood_points<EF: ExtensionField<PF<EF>>, E>(
-    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+    prover_state: &mut impl FSProver<EF>,
     num_samples: usize,
     num_variables: usize,
     evaluate_fn: E,
@@ -39,6 +37,7 @@ where
         // Generate OOD points from ProverState randomness
         for ood_point in &mut ood_points {
             *ood_point = prover_state.sample();
+            prover_state.duplexing();
         }
 
         // Evaluate the function at each OOD point

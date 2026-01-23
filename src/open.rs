@@ -1,5 +1,3 @@
-use std::array;
-
 use multilinear_toolkit::prelude::*;
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_util::log2_strict_usize;
@@ -17,10 +15,16 @@ where
             == self.folding_factor.total_number(self.n_rounds()) + self.final_sumcheck_rounds
     }
 
-    fn validate_statement(&self, statement: &[Evaluation<EF>]) -> bool {
-        statement
-            .iter()
-            .all(|e| e.num_variables() == self.num_variables)
+    fn validate_statement(&self, statement: &[SparseStatement<EF>]) {
+        statement.iter().for_each(|e| {
+            assert_eq!(e.total_num_variables, self.num_variables);
+            assert!(e.values.len() > 0);
+            assert!(
+                e.values
+                    .iter()
+                    .all(|v| v.selector < 1 << e.selector_num_variables())
+            );
+        });
     }
 
     fn validate_witness(&self, witness: &Witness<EF>, polynomial: &MleRef<'_, EF>) -> bool {
@@ -31,17 +35,14 @@ where
     #[instrument(name = "WHIR prove", skip_all)]
     pub fn prove(
         &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        statement: Vec<Evaluation<EF>>,
+        prover_state: &mut impl FSProver<EF>,
+        statement: Vec<SparseStatement<EF>>,
         witness: Witness<EF>,
         polynomial: &MleRef<'_, EF>,
     ) -> MultilinearPoint<EF> {
-        assert!(
-            self.validate_parameters()
-                && self.validate_statement(&statement)
-                && self.validate_witness(&witness, &polynomial),
-            "Invalid prover parameters, statement, or witness"
-        );
+        assert!(self.validate_parameters());
+        assert!(self.validate_witness(&witness, &polynomial));
+        self.validate_statement(&statement);
 
         let mut round_state = RoundState::initialize_first_round_state(
             self,
@@ -56,48 +57,15 @@ where
             self.round(round, prover_state, &mut round_state).unwrap();
         }
 
-        MultilinearPoint(round_state.randomness_vec)
-    }
+        prover_state.duplexing();
 
-    #[instrument(name = "WHIR batch prove", skip_all)]
-    pub fn batch_prove(
-        &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        statement_a: Vec<Evaluation<EF>>,
-        witness_a: Witness<EF>,
-        polynomial_a: &MleRef<'_, EF>,
-        statement_b: Vec<Evaluation<EF>>,
-        witness_b: Witness<EF>,
-        polynomial_b: &MleRef<'_, EF>,
-    ) -> MultilinearPoint<EF>
-    where
-        PF<EF>: TwoAdicField,
-    {
-        // (1 - X).PolB + X.PolA
-
-        assert_eq!(polynomial_a.n_vars(), self.num_variables);
-        assert!(polynomial_a.n_vars() >= polynomial_b.n_vars());
-        let mut round_state = RoundState::initialize_first_round_state_batch(
-            self,
-            prover_state,
-            statement_a,
-            witness_a,
-            polynomial_a,
-            statement_b,
-            witness_b,
-            polynomial_b,
-        );
-
-        for round in 0..=self.n_rounds() {
-            self.round(round, prover_state, &mut round_state).unwrap();
-        }
         MultilinearPoint(round_state.randomness_vec)
     }
 
     fn round(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state: &mut impl FSProver<EF>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()> {
         let folded_evaluations = &round_state.sumcheck_prover.evals;
@@ -242,7 +210,7 @@ where
     fn final_round(
         &self,
         round_index: usize,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state: &mut impl FSProver<EF>,
         round_state: &mut RoundState<EF>,
     ) -> ProofResult<()> {
         // Directly send coefficients of the polynomial to the verifier.
@@ -288,7 +256,9 @@ where
 
             // merkle authentication proof
             for merkle_proof in &merkle_proofs {
-                prover_state.hint_merkle_path(merkle_proof.to_vec());
+                for digest in merkle_proof {
+                    prover_state.hint_base_scalars(digest);
+                }
             }
         }
 
@@ -312,7 +282,7 @@ where
     #[allow(clippy::type_complexity)]
     fn compute_stir_queries(
         &self,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state: &mut impl FSProver<EF>,
         round_state: &RoundState<EF>,
         num_variables: usize,
         round_params: &RoundConfig<EF>,
@@ -350,7 +320,7 @@ where
 
 fn open_merkle_tree_at_challenges<EF: ExtensionField<PF<EF>>>(
     merkle_tree: &MerkleData<EF>,
-    prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+    prover_state: &mut impl FSProver<EF>,
     stir_challenges_indexes: &[usize],
 ) -> Vec<MleOwned<EF>> {
     let mut merkle_proofs = Vec::new();
@@ -376,7 +346,9 @@ fn open_merkle_tree_at_challenges<EF: ExtensionField<PF<EF>>>(
 
     // merkle authentication proof
     for merkle_proof in &merkle_proofs {
-        prover_state.hint_merkle_path(merkle_proof.to_vec());
+        for digest in merkle_proof {
+            prover_state.hint_base_scalars(digest);
+        }
     }
 
     answers
@@ -456,7 +428,7 @@ where
     fn run_sumcheck_many_rounds(
         &mut self,
         prev_folding_scalar: Option<EF>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state: &mut impl FSProver<EF>,
         n_rounds: usize,
         _pow_bits: usize, // TODO pow grinding
     ) -> MultilinearPoint<EF> {
@@ -484,15 +456,15 @@ where
 
     pub(crate) fn run_initial_sumcheck_rounds(
         evals: &MleRef<'_, EF>,
-        statement: &[Evaluation<EF>],
+        statement: &[SparseStatement<EF>],
         combination_randomness: EF,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
+        prover_state: &mut impl FSProver<EF>,
         folding_factor: usize,
         _pow_bits: usize, // TODO
     ) -> (Self, MultilinearPoint<EF>) {
         assert_ne!(folding_factor, 0);
 
-        let (weights, sum) = combine_statement::<EF>(statement, combination_randomness, EF::ONE);
+        let (weights, sum) = combine_statement::<EF>(statement, combination_randomness);
 
         let mut evals = evals.pack();
         let mut weights = Mle::Owned(MleOwned::ExtensionPacked(weights));
@@ -514,219 +486,6 @@ where
         };
 
         (sumcheck, challengess)
-    }
-
-    pub(crate) fn run_initial_sumcheck_rounds_batched(
-        pol_a: &MleRef<'_, EF>,
-        pol_b: &MleRef<'_, EF>,
-        statement_a: Vec<Evaluation<EF>>,
-        statement_b: Vec<Evaluation<EF>>,
-        combination_randomness: EF,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        folding_factor: usize,
-        _pow_bits: usize, // TODO
-    ) -> (Self, MultilinearPoint<EF>) {
-        let mut res = Vec::with_capacity(folding_factor);
-
-        let (weights_a, linear_a_f_1) =
-            combine_statement(&statement_a, combination_randomness, EF::ONE);
-        let (weights_b, linear_b_f_0) = combine_statement(
-            &statement_b,
-            combination_randomness,
-            combination_randomness.exp_u64(statement_a.len() as u64),
-        );
-
-        let pol_a = match pol_a {
-            MleRef::Base(evals) => evals,
-            _ => unimplemented!(),
-        };
-        let pol_a = PFPacking::<EF>::pack_slice(pol_a);
-        let pol_b = match pol_b {
-            MleRef::ExtensionPacked(evals) => evals,
-            _ => unimplemented!(),
-        };
-
-        let (linear_b_f_1, linear_a_f_0): (EF, EF) =
-            info_span!("1st sumcheck poly").in_scope(|| {
-                (
-                    dot_product_ef_packed_par(&weights_a[..pol_b.len()], &pol_b),
-                    dot_product_ef_packed_par(&weights_b, &pol_a[..pol_b.len()]),
-                )
-            });
-
-        let one_minus_x = DensePolynomial::new(vec![EF::ONE, -EF::ONE]);
-        let x = DensePolynomial::new(vec![EF::ZERO, EF::ONE]);
-        let sumcheck_poly_a = DensePolynomial::new(vec![linear_a_f_0, linear_a_f_1 - linear_a_f_0]);
-        let sumcheck_poly_b = DensePolynomial::new(vec![linear_b_f_0, linear_b_f_1 - linear_b_f_0]);
-        let sumcheck_poly_1 = &(&one_minus_x * &sumcheck_poly_b) + &(&x * &sumcheck_poly_a);
-
-        prover_state.add_extension_scalars(&sumcheck_poly_1.coeffs);
-
-        // TODO: re-enable PoW grinding
-        // prover_state.pow_grinding(pow_bits);
-
-        let r_1: EF = prover_state.sample();
-        let sum_1 = sumcheck_poly_1.evaluate(r_1);
-        res.push(r_1);
-
-        let _compression_span = info_span!("1st compression + 2nd sumcheck polynomial").entered();
-
-        let r_1_packed = EFPacking::<EF>::from(r_1);
-        let mut compressed_evals = unsafe { uninitialized_vec(pol_a.len()) };
-        let mut compressed_weights = unsafe { uninitialized_vec(pol_a.len()) };
-
-        let (c0_packed, c2_packed) = if pol_a.len() == pol_b.len() {
-            par_iter_split_2(pol_b)
-                .zip(par_iter_split_2(pol_a))
-                .zip(par_iter_split_2(&weights_b))
-                .zip(par_iter_split_2(&weights_a))
-                .zip(par_iter_mut_split_2(&mut compressed_evals))
-                .zip(par_iter_mut_split_2(&mut compressed_weights))
-                .map(
-                    |(
-                        (
-                            (
-                                (
-                                    ((&pol_b_left, &pol_b_right), (&pol_a_left, &pol_a_right)),
-                                    (&weights_b_left, &weights_b_right),
-                                ),
-                                (&weights_a_left, &weights_a_right),
-                            ),
-                            (compresses_eval_left, compresses_eval_right),
-                        ),
-                        (compresses_weight_left, compresses_weight_right),
-                    )| {
-                        *compresses_eval_left = (-pol_b_left + pol_a_left) * r_1 + pol_b_left;
-                        *compresses_eval_right = (-pol_b_right + pol_a_right) * r_1 + pol_b_right;
-
-                        *compresses_weight_left =
-                            (-weights_b_left + weights_a_left) * r_1 + weights_b_left;
-                        *compresses_weight_right =
-                            (-weights_b_right + weights_a_right) * r_1 + weights_b_right;
-
-                        sumcheck_quadratic((
-                            (compresses_eval_left, compresses_eval_right),
-                            (compresses_weight_left, compresses_weight_right),
-                        ))
-                    },
-                )
-                .reduce(
-                    || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
-                    |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
-                )
-        } else {
-            let (c0_packed_1, c2_packed_1) = pol_b
-                .par_iter()
-                .zip(par_iter_split_2_capped(pol_a, 0..pol_b.len()))
-                .zip(weights_b.par_iter())
-                .zip(par_iter_split_2_capped(&weights_a, 0..pol_b.len()))
-                .zip(par_iter_mut_split_2_capped(
-                    &mut compressed_evals,
-                    0..pol_b.len(),
-                ))
-                .zip(par_iter_mut_split_2_capped(
-                    &mut compressed_weights,
-                    0..pol_b.len(),
-                ))
-                .map(
-                    |(
-                        (
-                            (
-                                ((&pol_b_left, (&pol_a_left, &pol_a_right)), &weights_b_left),
-                                (&weights_a_left, &weights_a_right),
-                            ),
-                            (compresses_eval_left, compresses_eval_right),
-                        ),
-                        (compresses_weight_left, compresses_weight_right),
-                    )| {
-                        *compresses_eval_left = (-pol_b_left + pol_a_left) * r_1 + pol_b_left;
-                        *compresses_eval_right = r_1_packed * pol_a_right;
-
-                        *compresses_weight_left =
-                            (-weights_b_left + weights_a_left) * r_1 + weights_b_left;
-                        *compresses_weight_right = weights_a_right * r_1;
-
-                        sumcheck_quadratic((
-                            (compresses_eval_left, compresses_eval_right),
-                            (compresses_weight_left, compresses_weight_right),
-                        ))
-                    },
-                )
-                .reduce(
-                    || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
-                    |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
-                );
-            let (c0_packed_2, c2_packed_2) =
-                par_iter_split_2_capped(pol_a, pol_b.len()..pol_a.len() / 2)
-                    .zip(par_iter_split_2_capped(
-                        &weights_a,
-                        pol_b.len()..pol_a.len() / 2,
-                    ))
-                    .zip(par_iter_mut_split_2_capped(
-                        &mut compressed_evals,
-                        pol_b.len()..pol_a.len() / 2,
-                    ))
-                    .zip(par_iter_mut_split_2_capped(
-                        &mut compressed_weights,
-                        pol_b.len()..pol_a.len() / 2,
-                    ))
-                    .map(
-                        |(
-                            (
-                                ((&pol_a_left, &pol_a_right), (&weights_a_left, &weights_a_right)),
-                                (compresses_eval_left, compresses_eval_right),
-                            ),
-                            (compresses_weight_left, compresses_weight_right),
-                        )| {
-                            *compresses_eval_left = r_1_packed * pol_a_left;
-                            *compresses_eval_right = r_1_packed * pol_a_right;
-
-                            *compresses_weight_left = weights_a_left * r_1;
-                            *compresses_weight_right = weights_a_right * r_1;
-
-                            sumcheck_quadratic((
-                                (compresses_eval_left, compresses_eval_right),
-                                (compresses_weight_left, compresses_weight_right),
-                            ))
-                        },
-                    )
-                    .reduce(
-                        || (EFPacking::<EF>::ZERO, EFPacking::<EF>::ZERO),
-                        |(a0, a2), (b0, b2)| (a0 + b0, a2 + b2),
-                    );
-
-            (c0_packed_1 + c0_packed_2, c2_packed_1 + c2_packed_2)
-        };
-
-        let c0 = EFPacking::<EF>::to_ext_iter([c0_packed])
-            .into_iter()
-            .sum::<EF>();
-        let c2 = EFPacking::<EF>::to_ext_iter([c2_packed])
-            .into_iter()
-            .sum::<EF>();
-        let c1 = sum_1 - c0.double() - c2;
-
-        std::mem::drop(_compression_span);
-
-        let sumcheck_poly_2 = DensePolynomial::new(vec![c0, c1, c2]);
-        prover_state.add_extension_scalars(&sumcheck_poly_2.coeffs);
-        let r2: EF = prover_state.sample();
-        let sum_2 = sumcheck_poly_2.evaluate(r2);
-        res.push(r2);
-
-        let mut sumcheck = Self {
-            evals: MleOwned::ExtensionPacked(compressed_evals),
-            weights: MleOwned::ExtensionPacked(compressed_weights),
-            sum: sum_2,
-        };
-
-        // Apply rest of sumcheck rounds
-        let remaining_challenges = info_span!("remaining initial sumcheck rounds").in_scope(|| {
-            sumcheck.run_sumcheck_many_rounds(Some(r2), prover_state, folding_factor - 2, _pow_bits)
-        });
-        res.extend(remaining_challenges.0);
-
-        (sumcheck, MultilinearPoint(res))
     }
 }
 
@@ -751,8 +510,8 @@ where
 {
     pub(crate) fn initialize_first_round_state(
         prover: &WhirConfig<EF>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        mut statement: Vec<Evaluation<EF>>,
+        prover_state: &mut impl FSProver<EF>,
+        mut statement: Vec<SparseStatement<EF>>,
         witness: Witness<EF>,
         polynomial: &MleRef<'_, EF>,
     ) -> ProofResult<Self> {
@@ -761,7 +520,7 @@ where
             .into_iter()
             .zip(witness.ood_answers)
             .map(|(point, evaluation)| {
-                Evaluation::new(
+                SparseStatement::dense(
                     MultilinearPoint::expand_from_univariate(point, prover.num_variables),
                     evaluation,
                 )
@@ -794,150 +553,81 @@ where
         })
     }
 
-    pub(crate) fn initialize_first_round_state_batch(
-        prover: &WhirConfig<EF>,
-        prover_state: &mut ProverState<PF<EF>, EF, impl FSChallenger<EF>>,
-        mut statement_a: Vec<Evaluation<EF>>,
-        witness_a: Witness<EF>,
-        polynomial_a: &MleRef<'_, EF>,
-        mut statement_b: Vec<Evaluation<EF>>,
-        witness_b: Witness<EF>,
-        polynomial_b: &MleRef<'_, EF>,
-    ) -> Self {
-        let ood_statements_a = witness_a
-            .ood_points
-            .into_iter()
-            .zip(witness_a.ood_answers)
-            .map(|(point, evaluation)| {
-                Evaluation::new(
-                    MultilinearPoint::expand_from_univariate(point, polynomial_a.n_vars()),
-                    evaluation,
-                )
-            })
-            .collect::<Vec<_>>();
-        statement_a.splice(0..0, ood_statements_a);
-
-        let ood_statements_b = witness_b
-            .ood_points
-            .into_iter()
-            .zip(witness_b.ood_answers)
-            .map(|(point, evaluation)| {
-                Evaluation::new(
-                    MultilinearPoint::expand_from_univariate(point, polynomial_b.n_vars()),
-                    evaluation,
-                )
-            })
-            .collect::<Vec<_>>();
-        statement_b.splice(0..0, ood_statements_b);
-
-        let combination_randomness_gen: EF = prover_state.sample();
-
-        let (sumcheck_prover, folding_randomness) =
-            SumcheckSingle::run_initial_sumcheck_rounds_batched(
-                polynomial_a,
-                polynomial_b,
-                statement_a,
-                statement_b,
-                combination_randomness_gen,
-                prover_state,
-                prover.folding_factor.at_round(0) + 1,
-                prover.starting_folding_pow_bits,
-            );
-
-        Self {
-            domain_size: prover.starting_domain_size(),
-            next_domain_gen: PF::<EF>::two_adic_generator(
-                log2_strict_usize(prover.starting_domain_size())
-                    - prover.folding_factor.at_round(0),
-            ),
-            sumcheck_prover,
-            merkle_prover_data: witness_a.prover_data,
-            commitment_merkle_prover_data_b: Some(witness_b.prover_data),
-            randomness_vec: folding_randomness.0.clone(),
-        }
-    }
-
     fn folding_randomness(&self, folding_factor: usize) -> MultilinearPoint<EF> {
         MultilinearPoint(self.randomness_vec[self.randomness_vec.len() - folding_factor..].to_vec())
     }
 }
 
-#[instrument(skip_all, fields(num_constraints = statements.len(), n_vars = statements[0].num_variables()))]
-fn combine_statement<EF>(
-    statements: &[Evaluation<EF>],
-    challenge: EF,
-    start: EF,
-) -> (Vec<EFPacking<EF>>, EF)
+#[instrument(skip_all, fields(num_constraints = statements.len(), n_vars = statements[0].total_num_variables))]
+fn combine_statement<EF>(statements: &[SparseStatement<EF>], gamma: EF) -> (Vec<EFPacking<EF>>, EF)
 where
     EF: ExtensionField<PF<EF>>,
 {
-    let num_variables = statements[0].num_variables();
+    let num_variables = statements[0].total_num_variables;
     assert!(
         statements
             .iter()
-            .all(|e| e.num_variables() == num_variables)
+            .all(|e| e.total_num_variables == num_variables)
     );
 
-    const LOG_N_THREADS: usize = 5;
-
-    let mut statement_groups: [Vec<Vec<(Evaluation<EF>, usize)>>; LOG_N_THREADS] =
-        array::from_fn(|i| vec![vec![]; 1 << i]);
-
-    for (index, s) in statements.iter().enumerate() {
-        let boolean_starts = s.point[..LOG_N_THREADS - 1]
-            .iter()
-            .take_while(|&&x| x.is_zero() || x.is_one())
-            .map(|&x| x.is_one())
-            .collect::<Vec<_>>();
-        let starts_big_endian = boolean_starts
-            .iter()
-            .fold(0, |acc, &bit| (acc << 1) | (bit as usize));
-        let new_evaluation = Evaluation::new(
-            MultilinearPoint(s.point[boolean_starts.len()..].to_vec()),
-            s.value,
-        );
-        statement_groups[boolean_starts.len()][starts_big_endian].push((new_evaluation, index));
-    }
-
-    let mut combined_evals =
+    let mut combined_weights =
         EFPacking::<EF>::zero_vec(1 << (num_variables - packing_log_width::<EF>()));
 
     let mut combined_sum = EF::ZERO;
-    let mut gamma_pows = vec![start];
-    for _ in 1..statements.len() {
-        let last = *gamma_pows.last().unwrap();
-        gamma_pows.push(last * challenge);
-    }
+    let mut gamma_pow = EF::ONE;
 
-    let mut chunks_mut = vec![combined_evals.as_mut_slice()];
-
-    for n_bools_start in 0..LOG_N_THREADS {
-        combined_sum += statement_groups[n_bools_start]
-            .par_iter()
-            .zip(chunks_mut.par_iter_mut())
-            .map(|(group, combined_chunk)| {
-                let mut sum = EF::ZERO;
-                for (evaluation, original_index) in group {
-                    let gamma_pow = gamma_pows[*original_index];
-                    compute_sparse_eval_eq_packed::<EF>(
-                        &evaluation.point,
-                        combined_chunk,
-                        gamma_pow,
-                    );
-                    sum += evaluation.value * gamma_pow;
-                }
-                sum
-            })
-            .sum::<EF>();
-
-        let mut new_chunks_mut = Vec::with_capacity(chunks_mut.len() * 2);
-        for chunk in chunks_mut {
-            let (left, right) = chunk.split_at_mut(chunk.len() / 2);
-            new_chunks_mut.push(left);
-            new_chunks_mut.push(right);
+    for smt in statements {
+        if smt.values.len() == 1 || smt.inner_num_variables() < packing_log_width::<EF>() {
+            for evaluation in &smt.values {
+                compute_sparse_eval_eq_packed::<EF>(
+                    evaluation.selector,
+                    &smt.point,
+                    &mut combined_weights,
+                    gamma_pow,
+                );
+                combined_sum += evaluation.value * gamma_pow;
+                gamma_pow *= gamma;
+            }
+        } else {
+            let poly_eq = eval_eq_packed(&smt.point);
+            let shift = smt.inner_num_variables() - packing_log_width::<EF>();
+            let mut indexed_smt_values = smt.values.iter().enumerate().collect::<Vec<_>>();
+            indexed_smt_values.sort_by_key(|(_, e)| e.selector);
+            indexed_smt_values.dedup_by_key(|(_, e)| e.selector);
+            assert_eq!(
+                indexed_smt_values.len(),
+                smt.values.len(),
+                "Duplicate selectors in sparse statement"
+            );
+            let mut chunks_mut = split_at_mut_many(
+                &mut combined_weights,
+                &indexed_smt_values
+                    .iter()
+                    .map(|(_, e)| e.selector << shift)
+                    .collect::<Vec<_>>(),
+            );
+            chunks_mut.remove(0);
+            let mut next_gamma_powers = vec![gamma_pow];
+            for _ in 1..indexed_smt_values.len() {
+                next_gamma_powers.push(*next_gamma_powers.last().unwrap() * gamma);
+            }
+            for (e, &scalar) in smt.values.iter().zip(&next_gamma_powers) {
+                combined_sum += e.value * scalar;
+            }
+            chunks_mut
+                .into_par_iter()
+                .zip(&indexed_smt_values)
+                .for_each(|(out_buff, &(origin_index, _))| {
+                    out_buff[..1 << shift]
+                        .par_iter_mut()
+                        .zip(&poly_eq)
+                        .for_each(|(out_elem, &poly_eq_elem)| {
+                            *out_elem += poly_eq_elem * next_gamma_powers[origin_index];
+                        });
+                });
+            gamma_pow = *next_gamma_powers.last().unwrap() * gamma;
         }
-        chunks_mut = new_chunks_mut;
     }
 
-    (combined_evals, combined_sum)
+    (combined_weights, combined_sum)
 }
